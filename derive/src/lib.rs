@@ -92,7 +92,7 @@ fn expand_struct(
             type Fields = #field_list;
             type StructShape = ::reflector::#struct_shape;
 
-            const IDENT: &'static str = stringify!(#struct_ident);
+            const IDENT: &'static str = stringify!(#name);
         }
         impl #impl_generics ::reflector::HasShape for #struct_ident #type_generics {
             type Shape = ::reflector::StructShape;

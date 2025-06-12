@@ -1,5 +1,7 @@
 use reflector::*;
-use serde::ser::{SerializeStruct, SerializeStructVariant, SerializeTupleStruct, SerializeTupleVariant};
+use serde::ser::{
+    SerializeStruct, SerializeStructVariant, SerializeTupleStruct, SerializeTupleVariant,
+};
 use serde::{Serialize, Serializer};
 
 struct Reflect<'a, T>(&'a T);
@@ -23,6 +25,12 @@ trait ReflectType<Shape> {
         S: Serializer;
 }
 
+trait ReflectStruct<StructShape> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer;
+}
+
 impl<T> ReflectType<StructShape> for T
 where
     T: Struct + ReflectStruct<T::StructShape>,
@@ -35,11 +43,7 @@ where
     }
 }
 
-trait ReflectStruct<StructShape> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer;
-}
+
 
 impl<T> ReflectStruct<NamedStructShape> for T
 where
@@ -101,7 +105,7 @@ impl<S: SerializeStructVariant> SerdeSerializeStruct<true> for S {
     }
 }
 
-trait SerdeSerializeTupleStruct<const VARIANT: bool> {
+trait SerdeSerializeTuples<const VARIANT: bool> {
     type Ok;
     type Error: std::error::Error;
 
@@ -109,36 +113,36 @@ trait SerdeSerializeTupleStruct<const VARIANT: bool> {
     where
         T: ?Sized + Serialize;
     fn end(self) -> Result<Self::Ok, Self::Error>;
-
 }
 
-impl<S: SerializeTupleStruct> SerdeSerializeTupleStruct<false> for S {
+impl<S: SerializeTupleStruct> SerdeSerializeTuples<false> for S {
     type Ok = <S as SerializeTupleStruct>::Ok;
     type Error = <S as SerializeTupleStruct>::Error;
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
     where
-        T: ?Sized + Serialize {
+        T: ?Sized + Serialize,
+    {
         <S as SerializeTupleStruct>::serialize_field(self, value)
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
         <S as SerializeTupleStruct>::end(self)
     }
 }
-impl<S: SerializeTupleVariant> SerdeSerializeTupleStruct<true> for S {
+impl<S: SerializeTupleVariant> SerdeSerializeTuples<true> for S {
     type Ok = <S as SerializeTupleVariant>::Ok;
     type Error = <S as SerializeTupleVariant>::Error;
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
     where
-        T: ?Sized + Serialize {
+        T: ?Sized + Serialize,
+    {
         <S as SerializeTupleVariant>::serialize_field(self, value)
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
         <S as SerializeTupleVariant>::end(self)
     }
 }
-
 
 trait RecurseNamedFields<Parent> {
     const LEN: usize;
@@ -167,7 +171,10 @@ where
 {
     const LEN: usize = 1 + Tail::LEN;
 
-    fn serialize<const VARIANT: bool, S>(parent: &Parent, mut serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<const VARIANT: bool, S>(
+        parent: &Parent,
+        mut serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
         S: SerdeSerializeStruct<VARIANT>,
     {
@@ -188,27 +195,39 @@ where
     where
         S: Serializer,
     {
-        T::Fields::serialize(
-            self,
-            serializer.serialize_tuple_struct(T::IDENT, T::Fields::LEN)?,
-        )
+        if T::Fields::LEN == 1 {
+            serializer.serialize_newtype_struct(T::IDENT, T::Fields::first(self))
+        } else {
+            T::Fields::serialize(
+                self,
+                serializer.serialize_tuple_struct(T::IDENT, T::Fields::LEN)?,
+            )
+        }
     }
 }
 
 trait RecurseTupleFields<Parent> {
     const LEN: usize;
+    type TypeOfFirst: Serialize + ?Sized;
+
+    fn first(parent: &Parent) -> &Self::TypeOfFirst;
 
     fn serialize<const VARIANT: bool, S>(parent: &Parent, ctx: S) -> Result<S::Ok, S::Error>
     where
-        S: SerdeSerializeTupleStruct<VARIANT>;
+        S: SerdeSerializeTuples<VARIANT>;
 }
 
 impl<Parent> RecurseTupleFields<Parent> for () {
     const LEN: usize = 0;
+    type TypeOfFirst = ();
+
+    fn first(parent: &Parent) -> &Self::TypeOfFirst {
+        unreachable!() as _
+    }
 
     fn serialize<const VARIANT: bool, S>(parent: &Parent, ctx: S) -> Result<S::Ok, S::Error>
     where
-        S: SerdeSerializeTupleStruct<VARIANT>,
+        S: SerdeSerializeTuples<VARIANT>,
     {
         ctx.end()
     }
@@ -221,10 +240,18 @@ where
     Tail: RecurseTupleFields<Parent>,
 {
     const LEN: usize = 1 + Tail::LEN;
+    type TypeOfFirst = Head::Type;
 
-    fn serialize<const VARIANT: bool, S>(parent: &Parent, mut serializer: S) -> Result<S::Ok, S::Error>
+    fn first(parent: &Parent) -> &Self::TypeOfFirst {
+        Head::try_get_ref(parent).unwrap()
+    }
+
+    fn serialize<const VARIANT: bool, S>(
+        parent: &Parent,
+        mut serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
-        S: SerdeSerializeTupleStruct<VARIANT>,
+        S: SerdeSerializeTuples<VARIANT>,
     {
         serializer.serialize_field(Head::try_get_ref(parent).unwrap())?;
 
@@ -312,10 +339,24 @@ where
     where
         S: Serializer,
     {
-        T::Fields::serialize(
-            parent,
-            serializer.serialize_tuple_variant(Parent::IDENT, index, T::IDENT, T::Fields::LEN)?,
-        )
+        if T::Fields::LEN == 1 {
+            serializer.serialize_newtype_variant(
+                Parent::IDENT,
+                index,
+                T::IDENT,
+                T::Fields::first(parent),
+            )
+        } else {
+            T::Fields::serialize(
+                parent,
+                serializer.serialize_tuple_variant(
+                    Parent::IDENT,
+                    index,
+                    T::IDENT,
+                    T::Fields::LEN,
+                )?,
+            )
+        }
     }
 }
 
@@ -348,7 +389,9 @@ fn works() {
         //A,
         B(i32),
         C(i32, &'a str),
-        D { x: &'a str, }
+        D { x: &'a str },
     };
     println!("{}", serde_json::to_string(&Reflect(&C::B(3))).unwrap());
+    println!("{}", serde_json::to_string(&Reflect(&C::C(3, "hey"))).unwrap());
+    println!("{}", serde_json::to_string(&Reflect(&C::D { x: "hey" })).unwrap());
 }
