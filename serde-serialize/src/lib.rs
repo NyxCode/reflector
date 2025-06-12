@@ -17,7 +17,7 @@ pub trait FieldVisitor<Root>: Sized {
 trait Fields<Root> {
     const LEN: usize = 0;
 
-    fn for_each<V: FieldVisitor<Root>>(parent: &Root, visit: V) -> Result<V, V::Error> {
+    fn for_each<V: FieldVisitor<Root>>(_root: &Root, visit: V) -> Result<V, V::Error> {
         Ok(visit)
     }
 }
@@ -31,9 +31,9 @@ where
 {
     const LEN: usize = 1 + Tail::LEN;
 
-    fn for_each<V: FieldVisitor<Root>>(parent: &Root, visit: V) -> Result<V, V::Error> {
-        let visit = visit.visit::<Head>(Head::try_get_ref(parent).unwrap())?;
-        Tail::for_each(parent, visit)
+    fn for_each<V: FieldVisitor<Root>>(root: &Root, visit: V) -> Result<V, V::Error> {
+        let visit = visit.visit::<Head>(Head::try_get_ref(root).unwrap())?;
+        Tail::for_each(root, visit)
     }
 }
 
@@ -50,7 +50,7 @@ trait VariantVisitor<Root>: Sized {
 trait Variants<Root> {
     const LEN: usize = 0;
 
-    fn for_each<V: VariantVisitor<Root>>(parent: &Root, visit: V) -> Result<V, V::Error> {
+    fn for_each<V: VariantVisitor<Root>>(_: &Root, visit: V) -> Result<V, V::Error> {
         Ok(visit)
     }
 }
@@ -80,7 +80,7 @@ where
     T: Introspect<Root = T> + Impl<T::Root, T::Kind>,
 {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        T::serialize(&self.0, serializer)
+        T::serialize(self.0, serializer)
     }
 }
 
@@ -208,13 +208,13 @@ trait ImplTuple<Root, RootKind, Fields> {
 
 // struct I();
 impl<I: Struct> ImplTuple<I::Root, StructType, ()> for I {
-    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(_: &I::Root, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_tuple_struct(I::IDENT, 0)?.end()
     }
 }
 // enum Root {  I(), .. }
 impl<I: Variant> ImplTuple<I::Root, EnumType, ()> for I {
-    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(_: &I::Root, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_tuple_variant(I::Root::IDENT, I::INDEX, I::IDENT, 0)?
             .end()
     }

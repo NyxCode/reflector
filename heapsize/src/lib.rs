@@ -1,5 +1,3 @@
-use reflector::*;
-
 pub use reflect::Reflect;
 
 /// Compute the number of bytes a value uses on the heap
@@ -30,7 +28,7 @@ mod reflect {
         const HAS_HEAP: bool = T::HAS_HEAP;
 
         fn heap_size(&self) -> usize {
-            T::heap_size(&self.0)
+            T::heap_size(self.0)
         }
     }
 
@@ -42,7 +40,7 @@ mod reflect {
         const HAS_HEAP: bool = <T::Fields as HeapSizeFields<T>>::HAS_HEAP;
 
         fn heap_size(&self) -> usize {
-            <T::Fields as HeapSizeFields<T>>::heap_size(&self)
+            <T::Fields as HeapSizeFields<T>>::heap_size(self)
         }
     }
 
@@ -54,7 +52,7 @@ mod reflect {
         const HAS_HEAP: bool = <T::Variants as HeapSizeVariants<T>>::HAS_HEAP;
 
         fn heap_size(&self) -> usize {
-            <T::Variants as HeapSizeVariants<T>>::heap_size(&self)
+            <T::Variants as HeapSizeVariants<T>>::heap_size(self)
         }
     }
 
@@ -68,7 +66,7 @@ mod reflect {
     impl<P> HeapSizeFields<P> for () {
         const HAS_HEAP: bool = false;
 
-        fn heap_size(parent: &P) -> usize {
+        fn heap_size(_: &P) -> usize {
             0
         }
     }
@@ -95,7 +93,7 @@ mod reflect {
     impl<P> HeapSizeVariants<P> for () {
         const HAS_HEAP: bool = false;
 
-        fn heap_size(parent: &P) -> usize {
+        fn heap_size(_: &P) -> usize {
             0
         }
     }
@@ -147,7 +145,7 @@ mod impls {
         }
     }
 
-    impl<'a, T: HeapSize + ?Sized> HeapSize for &'a T {
+    impl<T: HeapSize + ?Sized> HeapSize for &T {
         const HAS_HEAP: bool = T::HAS_HEAP;
 
         fn heap_size(&self) -> usize {
