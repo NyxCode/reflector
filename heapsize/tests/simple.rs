@@ -1,15 +1,15 @@
 use heapsize::{HeapSize, Reflect};
-use reflector::Reflect;
+use reflector::Introspect;
 
 #[test]
 fn asdf() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     struct MyStruct(i32);
 }
 
 #[test]
 fn simple_struct() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub struct MyStruct {
         a: i32,
         b: Vec<u8>,
@@ -27,7 +27,7 @@ fn simple_struct() {
 
 #[test]
 fn tuple_struct() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub struct MyStruct(&'static str, Box<str>, Vec<Self>);
 
     impl HeapSize for MyStruct {
@@ -46,7 +46,7 @@ fn tuple_struct() {
 
 #[test]
 fn with_lifetime() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub struct X<'a, 'b>(&'a i32, &'b i32);
 
     assert_eq!(Reflect(&X(&0, &0)).heap_size(), 0);
@@ -54,7 +54,7 @@ fn with_lifetime() {
 
 #[test]
 fn with_generics() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub struct X<A, B>(A, Box<B>);
 
     assert_eq!(Reflect(&X(Box::new(0u8), Box::new(0u8))).heap_size(), 2);
@@ -62,11 +62,11 @@ fn with_generics() {
 
 #[test]
 fn unit() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub struct A;
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub struct B();
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub struct C {};
 
     assert_eq!(Reflect(&A).heap_size(), 0);
@@ -76,7 +76,7 @@ fn unit() {
 
 #[test]
 fn simple_enum() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     pub enum Simple {
         A(i32),
         B(Box<[u8; 128]>),
@@ -90,7 +90,7 @@ fn simple_enum() {
 
 #[test]
 fn gigantic() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     #[rustfmt::skip]
     pub struct Gigantic {
         f00: u8, f01: u8, f02: u8, f03: u8, f04: u8, f05: u8, f06: u8, f07: u8, f08: u8, f09: u8, 

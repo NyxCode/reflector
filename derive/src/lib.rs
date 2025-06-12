@@ -6,7 +6,7 @@ use syn::{
     Variant, Visibility,
 };
 
-#[proc_macro_derive(Reflect)]
+#[proc_macro_derive(Introspect)]
 pub fn my_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     entry(input)
         .unwrap_or_else(|err| err.to_compile_error())
@@ -68,32 +68,31 @@ fn expand_struct(
                 parent_ident,
                 generics,
                 &field_struct_idents[i],
-                i,
+                i as u32,
                 field,
                 variant,
             )
         })
         .collect::<TokenStream>();
-    let type_impl = (parent_ident == struct_ident).then(|| expand_type(generics, parent_ident));
-    let struct_shape = match fields {
-        Fields::Named(_) => quote!(NamedStructShape),
-        Fields::Unnamed(_) => quote!(TupleStructShape),
-        Fields::Unit => quote!(UnitStructShape),
+    let shape = match fields {
+        Fields::Named(_) => quote!(NamedStruct),
+        Fields::Unnamed(_) => quote!(TupleStruct),
+        Fields::Unit => quote!(UnitStruct),
     };
 
     quote! {
         #field_items
-        #type_impl
 
         impl #impl_generics ::reflector::Struct for #struct_ident #type_generics {
-            type Parent = #parent_ident #type_generics;
             type Fields = #field_list;
-            type StructShape = ::reflector::#struct_shape;
-
-            const IDENT: &'static str = stringify!(#name);
+            type Shape = ::reflector::#shape;
         }
-        impl #impl_generics ::reflector::HasShape for #struct_ident #type_generics {
-            type Shape = ::reflector::StructShape;
+
+        impl #impl_generics ::reflector::Introspect for #struct_ident #type_generics {
+            const IDENT: &'static str = stringify!(#name);
+
+            type Root = #parent_ident #type_generics;
+            type Kind = ::reflector::StructType;
         }
     }
 }
@@ -114,32 +113,36 @@ fn for_enum(parent: &ItemEnum) -> TokenStream {
             .map(|i| quote!(#i #type_generics)),
     );
 
-    let variants = (0..parent.variants.len())
-        .map(|i| for_variant(parent, &parent.variants[i], i, &variant_struct_idents[i]));
-
-    let type_impl = expand_type(&parent.generics, &parent.ident);
+    let variants = (0..parent.variants.len()).map(|i| {
+        for_variant(
+            parent,
+            &parent.variants[i],
+            i as u32,
+            &variant_struct_idents[i],
+        )
+    });
 
     quote! {
         #(#variants)*
 
-        #type_impl
         impl #impl_generics ::reflector::Enum for #parent_ident #type_generics {
             type Variants = #variant_list;
 
+        }
+
+        impl #impl_generics ::reflector::Introspect for #parent_ident #type_generics {
             const IDENT: &'static str = stringify!(#parent_ident);
-        }
 
-        impl #impl_generics ::reflector::HasShape for #parent_ident #type_generics {
-            type Shape = ::reflector::EnumShape;
+            type Root = #parent_ident #type_generics;
+            type Kind = ::reflector::EnumType;
         }
-
     }
 }
 
 fn for_variant(
     parent: &ItemEnum,
     variant: &Variant,
-    index: usize,
+    index: u32,
     variant_struct_ident: &Ident,
 ) -> TokenStream {
     let generics = &parent.generics;
@@ -154,7 +157,7 @@ fn for_variant(
             Fields::Unnamed(_) => quote!((..)),
             Fields::Unit => quote!(),
         };
-        quote!(matches!(p, Self::Parent::#variant_ident #pattern))
+        quote!(matches!(p, Self::Root::#variant_ident #pattern))
     };
 
     let struct_items = expand_struct(
@@ -169,9 +172,9 @@ fn for_variant(
     quote! {
         #vis struct #variant_struct_ident #generics (#parent_ident #generics);
         impl #impl_generics ::reflector::Variant for #variant_struct_ident #type_generics {
-            const INDEX: usize = #index;
+            const INDEX: u32 = #index;
 
-            fn is_active(p: &Self::Parent) -> bool { #is_active }
+            fn is_active(p: &Self::Root) -> bool { #is_active }
         }
         #struct_items
     }
@@ -183,20 +186,12 @@ fn church_list(elements: impl DoubleEndedIterator<Item = TokenStream>) -> TokenS
         .fold(quote![()], |list, element| quote![(#element, #list)])
 }
 
-fn expand_type(generics: &Generics, ident: &Ident) -> TokenStream {
-    let (impl_generics, type_generics, _) = generics.split_for_impl();
-
-    quote! {
-        impl #impl_generics ::reflector::Type for #ident #type_generics {}
-    }
-}
-
 fn generate_field_items(
     parent_vis: &Visibility,
     parent_ident: &Ident,
     parent_generics: &Generics,
     field_struct_ident: &Ident,
-    field_idx: usize,
+    field_idx: u32,
     field: &Field,
     inside_variant: Option<&Variant>,
 ) -> TokenStream {
@@ -206,7 +201,7 @@ fn generate_field_items(
     let accessor = accessor(
         inside_variant,
         &match &field.ident {
-            None => Member::Unnamed(Index::from(field_idx)),
+            None => Member::Unnamed(Index::from(field_idx as usize)),
             Some(ident) => Member::Named(ident.clone()),
         },
     );
@@ -224,13 +219,13 @@ fn generate_field_items(
         }
         impl #impl_generics ::reflector::Field for #field_struct_ident #type_generics {
             type Type = <#parent_ident #type_generics as ::reflector::HasField<Self>>::Type;
-            type Parent = #parent_ident #type_generics;
+            type Root = #parent_ident #type_generics;
 
             const IDENT: Option<&'static str> = #ident;
-            const INDEX: usize = #field_idx;
+            const INDEX: u32 = #field_idx;
 
-            fn try_get_ref(p: &Self::Parent) -> Option<&Self::Type> { #accessor }
-            fn try_get_mut(p: &mut Self::Parent) -> Option<&mut Self::Type> { #accessor }
+            fn try_get_ref(p: &Self::Root) -> Option<&Self::Type> { #accessor }
+            fn try_get_mut(p: &mut Self::Root) -> Option<&mut Self::Type> { #accessor }
         }
     }
 }
@@ -240,7 +235,7 @@ fn accessor(inside_variant: Option<&Variant>, field: &Member) -> TokenStream {
 
     quote! {
         match p {
-            Self::Parent #(:: #inside_variant)* { #field: x, .. } => Some(x),
+            Self::Root #(:: #inside_variant)* { #field: x, .. } => Some(x),
             _ => None,
         }
     }

@@ -5,17 +5,15 @@ pub use reflect::Reflect;
 /// Compute the number of bytes a value uses on the heap
 pub trait HeapSize {
     const HAS_HEAP: bool;
-    
+
     fn heap_size(&self) -> usize;
 }
 
-
 // instead of a derive macro, this enables users to get an impl of `HeapSize` for their structs.
 mod reflect {
-    use reflector::*;
     use super::HeapSize;
-    
-    
+    use reflector::*;
+
     pub struct Reflect<'a, T>(pub &'a T);
 
     trait ReflectHelper<Shape> {
@@ -23,11 +21,11 @@ mod reflect {
 
         fn heap_size(&self) -> usize;
     }
-    
+
     impl<'a, T> HeapSize for Reflect<'a, T>
     where
-        T: HasShape,
-        T: ReflectHelper<T::Shape>,
+        T: Introspect,
+        T: ReflectHelper<T::Kind>,
     {
         const HAS_HEAP: bool = T::HAS_HEAP;
 
@@ -35,10 +33,10 @@ mod reflect {
             T::heap_size(&self.0)
         }
     }
-    
-    impl<T> ReflectHelper<StructShape> for T 
+
+    impl<T> ReflectHelper<StructType> for T
     where
-        T: Struct, 
+        T: Struct,
         T::Fields: HeapSizeFields<T>,
     {
         const HAS_HEAP: bool = <T::Fields as HeapSizeFields<T>>::HAS_HEAP;
@@ -47,8 +45,8 @@ mod reflect {
             <T::Fields as HeapSizeFields<T>>::heap_size(&self)
         }
     }
-    
-    impl<T> ReflectHelper<EnumShape> for T
+
+    impl<T> ReflectHelper<EnumType> for T
     where
         T: Enum,
         T::Variants: HeapSizeVariants<T>,
@@ -59,9 +57,7 @@ mod reflect {
             <T::Variants as HeapSizeVariants<T>>::heap_size(&self)
         }
     }
-    
-    
-    
+
     // helper trait implemented recursively for a list of fields, e.g `(Field0, (Field1, ()))`
     trait HeapSizeFields<P> {
         const HAS_HEAP: bool;
@@ -78,18 +74,16 @@ mod reflect {
     }
     impl<P, Head, Tail> HeapSizeFields<P> for (Head, Tail)
     where
-        Head: Field<Parent = P>,
+        Head: Field<Root = P>,
         Head::Type: HeapSize,
         Tail: HeapSizeFields<P>,
     {
         const HAS_HEAP: bool = Head::Type::HAS_HEAP || Tail::HAS_HEAP;
-        
+
         fn heap_size(parent: &P) -> usize {
             Head::try_get_ref(parent).unwrap().heap_size() + Tail::heap_size(parent)
         }
     }
-    
-
 
     // helper trait implemented recursively for a list of fields, e.g `(Field0, (Field1, ()))`
     trait HeapSizeVariants<P> {
@@ -107,12 +101,12 @@ mod reflect {
     }
     impl<P, Head, Tail> HeapSizeVariants<P> for (Head, Tail)
     where
-        Head: Variant<Parent = P>,
+        Head: Variant<Root = P>,
         Head::Fields: HeapSizeFields<P>,
         Tail: HeapSizeVariants<P>,
     {
         const HAS_HEAP: bool = Head::Fields::HAS_HEAP || Tail::HAS_HEAP;
-        
+
         fn heap_size(parent: &P) -> usize {
             if Head::is_active(parent) {
                 Head::Fields::heap_size(parent)
@@ -121,7 +115,6 @@ mod reflect {
             }
         }
     }
-    
 }
 
 // very boring impls for primitive types & stuff from std
@@ -132,16 +125,14 @@ mod impls {
         ($($t:ty),*) => {$(
             impl HeapSize for $t  {
                 const HAS_HEAP: bool = false;
-                
+
                 fn heap_size(&self) -> usize { 0 }
             }
         )*};
     }
 
     primitives!(
-        u8, u16, u32, u64, u128, 
-        i8, i16, i32, i64, i128,
-        f32, f64, str
+        u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64, str
     );
 
     impl<T: HeapSize> HeapSize for [T] {

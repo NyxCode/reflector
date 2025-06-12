@@ -3,48 +3,35 @@ use serde::ser::{
     SerializeStruct, SerializeStructVariant, SerializeTupleStruct, SerializeTupleVariant,
 };
 use serde::{Serialize, Serializer};
-use std::ops::ControlFlow;
 
 struct Reflect<'a, T>(&'a T);
 
-// --
+pub trait FieldVisitor<Root>: Sized {
+    type Error;
 
-trait FieldVisitor<Parent>: Sized {
-    type Break;
-
-    fn visit<F>(self, value: &F::Type) -> ControlFlow<Self::Break, Self>
+    fn visit<F>(self, value: &F::Type) -> Result<Self, Self::Error>
     where
-        F: Field<Parent = Parent>,
-        F::Type: Serialize;
+        F: Field<Root = Root, Type: Serialize>;
 }
 
-trait Fields<Parent> {
+trait Fields<Root> {
     const LEN: usize = 0;
-    const IS_NEWTYPE: bool = false;
 
-    fn for_each<V>(parent: &Parent, visit: V) -> ControlFlow<V::Break, V>
-    where
-        V: FieldVisitor<Parent>,
-    {
-        ControlFlow::Continue(visit)
+    fn for_each<V: FieldVisitor<Root>>(parent: &Root, visit: V) -> Result<V, V::Error> {
+        Ok(visit)
     }
 }
 
-impl<Parent> Fields<Parent> for () {}
+impl<Root> Fields<Root> for () {}
 
-impl<Parent, Head, Tail> Fields<Parent> for (Head, Tail)
+impl<Root, Head, Tail> Fields<Root> for (Head, Tail)
 where
-    Head: Field<Parent = Parent>,
-    Head::Type: Serialize,
-    Tail: Fields<Parent>,
+    Head: Field<Root = Root, Type: Serialize>,
+    Tail: Fields<Root>,
 {
     const LEN: usize = 1 + Tail::LEN;
-    const IS_NEWTYPE: bool = Self::LEN == 1;
 
-    fn for_each<V>(parent: &Parent, visit: V) -> ControlFlow<V::Break, V>
-    where
-        V: FieldVisitor<Parent>,
-    {
+    fn for_each<V: FieldVisitor<Root>>(parent: &Root, visit: V) -> Result<V, V::Error> {
         let visit = visit.visit::<Head>(Head::try_get_ref(parent).unwrap())?;
         Tail::for_each(parent, visit)
     }
@@ -52,290 +39,262 @@ where
 
 // --
 
-trait VariantVisitor<Parent>: Sized {
-    type Break;
+trait VariantVisitor<Root>: Sized {
+    type Error;
 
-    fn visit<T>(self, parent: &Parent) -> ControlFlow<Self::Break, Self>
+    fn visit<T>(self, parent: &Root) -> Result<Self, Self::Error>
     where
-        T: ReflectStruct<Parent, T::StructShape, <T::Fields as Count>::Count>,
-        T: Variant<Parent = Parent>,
-        T::Fields: Fields<Parent> + Count;
+        T: Variant<Root = Root, Fields: Fields<Root>> + Impl<Root, T::Kind>;
 }
 
-trait Variants<Parent> {
+trait Variants<Root> {
     const LEN: usize = 0;
 
-    fn for_each<V>(parent: &Parent, visit: V) -> ControlFlow<V::Break, V>
-    where
-        V: VariantVisitor<Parent>,
-    {
-        ControlFlow::Continue(visit)
+    fn for_each<V: VariantVisitor<Root>>(parent: &Root, visit: V) -> Result<V, V::Error> {
+        Ok(visit)
     }
 }
 
 impl<Parent> Variants<Parent> for () {}
 
-impl<Parent, Head, Tail> Variants<Parent> for (Head, Tail)
+impl<Root, Head, Tail> Variants<Root> for (Head, Tail)
 where
-    Head: HasShape,
-    Head: Variant<Parent = Parent>
-        + ReflectStruct<Parent, Head::StructShape, <Head::Fields as Count>::Count>,
-    Head::Fields: Fields<Parent> + Count,
-    Tail: Variants<Parent>,
+    Head: Variant<Root = Root, Fields: Fields<Root>> + Impl<Root, Head::Kind>,
+    Tail: Variants<Root>,
 {
     const LEN: usize = 1 + Tail::LEN;
 
-    fn for_each<V>(parent: &Parent, visit: V) -> ControlFlow<V::Break, V>
+    fn for_each<V>(parent: &Root, visit: V) -> Result<V, V::Error>
     where
-        V: VariantVisitor<Parent>,
+        V: VariantVisitor<Root>,
     {
         let visit = visit.visit::<Head>(parent)?;
         Tail::for_each(parent, visit)
     }
 }
 
-// ---
-
-trait Count {
-    type Count;
-}
-struct ZeroOrMany;
-struct One;
-
-impl Count for () {
-    type Count = ZeroOrMany;
-}
-impl<F> Count for (F, ()) {
-    type Count = One;
-}
-impl<A, B, C: Count> Count for (A, (B, C)) {
-    type Count = ZeroOrMany;
-}
-
-// --
-
-trait TypeKind<Shape> {
-    type Kind;
-}
-
-impl<T: Struct + HasShape> TypeKind<T::Shape> for T
-where
-    T: StructKind<T::StructShape>,
-{
-    type Kind = <T as StructKind<T::StructShape>>::Kind;
-}
-
-trait StructKind<StructShape> {
-    type Kind;
-}
-impl<T> StructKind<NamedStructShape> for T {
-    type Kind = kind::Struct;
-}
-impl<T> StructKind<UnitStructShape> for T {
-    type Kind = kind::Unit;
-}
-impl<T: Struct> StructKind<TupleStructShape> for T
-where
-    T: TupleStructKind<T::Fields>,
-{
-    type Kind = <T as TupleStructKind<T::Fields>>::Kind;
-}
-
-trait TupleStructKind<Fields> {
-    type Kind;
-}
-impl<T> TupleStructKind<()> for T
-where
-    T: Struct,
-{
-    type Kind = kind::Tuple;
-}
-impl<T, A> TupleStructKind<(A, ())> for T
-where
-    T: Struct,
-    A: Field,
-{
-    type Kind = kind::NewType;
-}
-impl<T, A, B, C> TupleStructKind<(A, (B, C))> for T
-where
-    T: Struct,
-    C: Fields<T::Parent>,
-{
-    type Kind = kind::NewType;
-}
-
-mod kind {
-    pub struct Enum;
-    pub struct Tuple;
-    pub struct Struct;
-    pub struct NewType;
-    pub struct Unit;
-}
-
 // --
 
 impl<'a, T> Serialize for Reflect<'a, T>
 where
-    T: HasShape,
-    T: ReflectType<T::Shape>,
+    T: Introspect<Root = T> + Impl<T::Root, T::Kind>,
 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         T::serialize(&self.0, serializer)
     }
 }
 
-trait ReflectType<Shape> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer;
+trait Impl<Root, Kind> {
+    fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
 }
 
-trait ReflectStruct<Parent, StructShape, Count> {
-    fn serialize<S>(parent: &Parent, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer;
+trait ImplStruct<Root, RootKind, Shape> {
+    fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
 }
 
-impl<T> ReflectType<StructShape> for T
+impl<I: Struct> Impl<I::Root, StructType> for I
 where
-    T: Struct,
-    T::Fields: Count,
-    T: ReflectStruct<T, T::StructShape, <T::Fields as Count>::Count>,
+    I: ImplStruct<I::Root, <I::Root as Introspect>::Kind, I::Shape>,
 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        <T as ReflectStruct<_, _, _>>::serialize(self, serializer)
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        <I as ImplStruct<_, _, _>>::serialize(root, s)
     }
 }
 
-impl<Parent, T, C> ReflectStruct<Parent, NamedStructShape, C> for T
-where
-    T: Struct<Parent = Parent>,
-    T::Fields: Fields<Parent>,
-{
-    fn serialize<S>(parent: &Parent, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        struct Visit<S>(S);
-        impl<Parent, Ser: SerializeStruct> FieldVisitor<Parent> for Visit<Ser> {
-            type Break = Ser::Error;
+// struct I;
+impl<I: Struct> ImplStruct<I::Root, StructType, UnitStruct> for I {
+    fn serialize<S: Serializer>(_: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_unit_struct(I::IDENT)
+    }
+}
+// enum Root { I, .. };
+impl<I: Variant> ImplStruct<I::Root, EnumType, UnitStruct> for I {
+    fn serialize<S: Serializer>(_: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_unit_variant(I::Root::IDENT, I::INDEX, I::IDENT)
+    }
+}
 
-            fn visit<F>(mut self, value: &F::Type) -> ControlFlow<Self::Break, Self>
+// struct I { .. }
+impl<I: Struct> ImplStruct<I::Root, StructType, NamedStruct> for I
+where
+    I::Fields: Fields<I::Root>,
+{
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        struct Visit<S>(S);
+        impl<Root, S: SerializeStruct> FieldVisitor<Root> for Visit<S> {
+            type Error = S::Error;
+
+            fn visit<F>(mut self, value: &F::Type) -> Result<Self, Self::Error>
             where
-                F: Field<Parent = Parent>,
-                F::Type: Serialize,
+                F: Field<Root = Root, Type: Serialize>,
             {
-                match self.0.serialize_field(F::IDENT.unwrap(), value) {
-                    Ok(_) => ControlFlow::Continue(self),
-                    Err(err) => ControlFlow::Break(err),
-                }
+                self.0.serialize_field(F::IDENT.unwrap(), value)?;
+                Ok(self)
             }
         }
 
-        let visit = Visit(serializer.serialize_struct(T::IDENT, T::Fields::LEN)?);
-        match T::Fields::for_each(parent, visit) {
-            ControlFlow::Continue(c) => c.0.end(),
-            ControlFlow::Break(err) => Err(err),
-        }
+        let visit = Visit(s.serialize_struct(I::IDENT, I::Fields::LEN)?);
+        I::Fields::for_each(root, visit)?.0.end()
     }
 }
-
-impl<Parent, T, OnlyField> ReflectStruct<Parent, TupleStructShape, One> for T
+// enum Parent { I { .. }, .. }
+impl<I: Variant> ImplStruct<I::Root, EnumType, NamedStruct> for I
 where
-    T: Struct<Parent = Parent, Fields = (OnlyField, ())>,
-    OnlyField: Field<Parent = Parent, Type: Serialize>,
-    T::Fields: Fields<Parent>,
+    I::Fields: Fields<I::Root>,
 {
-    fn serialize<S>(parent: &Parent, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_newtype_struct(T::IDENT, OnlyField::try_get_ref(parent).unwrap())
-    }
-}
-
-impl<Parent, T> ReflectStruct<Parent, TupleStructShape, ZeroOrMany> for T
-where
-    T: Struct<Parent = Parent>,
-    T::Fields: Fields<Parent>,
-{
-    fn serialize<S>(parent: &Parent, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
         struct Visit<S>(S);
-        impl<Parent, Ser: SerializeTupleStruct> FieldVisitor<Parent> for Visit<Ser> {
-            type Break = Ser::Error;
+        impl<Root, S: SerializeStructVariant> FieldVisitor<Root> for Visit<S> {
+            type Error = S::Error;
 
-            fn visit<F>(mut self, value: &F::Type) -> ControlFlow<Self::Break, Self>
+            fn visit<F>(mut self, value: &F::Type) -> Result<Self, Self::Error>
             where
-                F: Field<Parent = Parent>,
-                F::Type: Serialize,
+                F: Field<Root = Root, Type: Serialize>,
             {
-                match self.0.serialize_field(value) {
-                    Ok(..) => ControlFlow::Continue(self),
-                    Err(err) => ControlFlow::Break(err),
-                }
+                self.0.serialize_field(F::IDENT.unwrap(), value)?;
+                Ok(self)
             }
         }
 
-        let visit = Visit(serializer.serialize_tuple_struct(T::IDENT, T::Fields::LEN)?);
-        match T::Fields::for_each(parent, visit) {
-            ControlFlow::Continue(s) => s.0.end(),
-            ControlFlow::Break(err) => Err(err),
-        }
+        let visit = Visit(s.serialize_struct_variant(
+            I::Root::IDENT,
+            I::INDEX,
+            I::IDENT,
+            I::Fields::LEN,
+        )?);
+        I::Fields::for_each(root, visit)?.0.end()
     }
 }
 
-// enum
-
-impl<T> ReflectType<EnumShape> for T
+// enum I { .. }
+impl<I: Enum> Impl<I::Root, EnumType> for I
 where
-    T: Enum,
-    T::Variants: Variants<T>,
+    I::Variants: Variants<I::Root>,
 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
         struct Visit<S>(S);
-        impl<S: Serializer, Parent> VariantVisitor<Parent> for Visit<S> {
-            type Break = Result<S::Ok, S::Error>;
+        impl<Root, S: Serializer> VariantVisitor<Root> for Visit<S> {
+            type Error = Result<S::Ok, S::Error>;
 
-            fn visit<T>(self, parent: &Parent) -> ControlFlow<Self::Break, Self>
+            fn visit<T>(self, root: &Root) -> Result<Self, Self::Error>
             where
-                T: ReflectStruct<Parent, T::StructShape, <T::Fields as Count>::Count>,
-                T: Variant<Parent = Parent>,
-                T::Fields: Fields<Parent> + Count,
+                T: Variant<Root = Root, Fields: Fields<Root>> + Impl<Root, T::Kind>,
             {
-                if T::is_active(parent) {
-                    ControlFlow::Break(<T as ReflectStruct<
-                        Parent,
-                        T::StructShape,
-                        <T::Fields as Count>::Count,
-                    >>::serialize(parent, self.0))
+                if T::is_active(root) {
+                    Err(T::serialize(root, self.0))
                 } else {
-                    ControlFlow::Continue(self)
+                    Ok(self)
                 }
             }
         }
 
-        T::Variants::for_each(self, Visit(serializer))
-            .break_value()
-            .expect("one variant must be active")
+        I::Variants::for_each(root, Visit(s)).err().unwrap()
+    }
+}
+
+// struct I(..);
+impl<I: Struct> ImplStruct<I::Root, <I::Root as Introspect>::Kind, TupleStruct> for I
+where
+    I: ImplTuple<I::Root, <I::Root as Introspect>::Kind, I::Fields>,
+{
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        <I as ImplTuple<_, _, _>>::serialize(root, s)
+    }
+}
+
+trait ImplTuple<Root, RootKind, Fields> {
+    fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
+}
+
+// struct I();
+impl<I: Struct> ImplTuple<I::Root, StructType, ()> for I {
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_tuple_struct(I::IDENT, 0)?.end()
+    }
+}
+// enum Root {  I(), .. }
+impl<I: Variant> ImplTuple<I::Root, EnumType, ()> for I {
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_tuple_variant(I::Root::IDENT, I::INDEX, I::IDENT, 0)?
+            .end()
+    }
+}
+
+// struct I(A);
+impl<I: Struct, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, StructType, (A, ())>
+    for I
+{
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(I::IDENT, A::try_get_ref(root).unwrap())
+    }
+}
+// enum Root { I(A), .. };
+impl<I: Variant, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, EnumType, (A, ())>
+    for I
+{
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_variant(
+            I::Root::IDENT,
+            I::INDEX,
+            I::IDENT,
+            A::try_get_ref(root).unwrap(),
+        )
+    }
+}
+
+// struct I(A, B, ..);
+impl<I: Struct, A, B, C> ImplTuple<I::Root, StructType, (A, (B, C))> for I
+where
+    I::Fields: Fields<I::Root>,
+{
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        struct Visit<S>(S);
+
+        impl<Root, S: SerializeTupleStruct> FieldVisitor<Root> for Visit<S> {
+            type Error = S::Error;
+
+            fn visit<F>(mut self, value: &F::Type) -> Result<Self, Self::Error>
+            where
+                F: Field<Root = Root, Type: Serialize>,
+            {
+                self.0.serialize_field(value)?;
+                Ok(self)
+            }
+        }
+
+        let visit = Visit(s.serialize_tuple_struct(I::IDENT, I::Fields::LEN)?);
+        I::Fields::for_each(root, visit)?.0.end()
+    }
+}
+// enum Root { I(A, B, ..), .. };
+impl<I: Variant, A, B, C> ImplTuple<I::Root, EnumType, (A, (B, C))> for I
+where
+    I::Fields: Fields<I::Root>,
+{
+    fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
+        struct Visit<S>(S);
+
+        impl<Root, S: SerializeTupleVariant> FieldVisitor<Root> for Visit<S> {
+            type Error = S::Error;
+
+            fn visit<F>(mut self, value: &F::Type) -> Result<Self, Self::Error>
+            where
+                F: Field<Root = Root, Type: Serialize>,
+            {
+                self.0.serialize_field(value)?;
+                Ok(self)
+            }
+        }
+
+        let visit =
+            Visit(s.serialize_tuple_variant(I::Root::IDENT, I::INDEX, I::IDENT, I::Fields::LEN)?);
+        I::Fields::for_each(root, visit)?.0.end()
     }
 }
 
 #[test]
 fn works() {
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     struct A<X> {
         a: i32,
         b: X,
@@ -350,20 +309,21 @@ fn works() {
         serde_json::to_string(&Reflect(&A { a: 42, b: "hey" })).unwrap()
     );
 
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     struct B<'a>(i32, &'a str);
     println!(
         "{}",
         serde_json::to_string(&Reflect(&B(42, "hey"))).unwrap()
     );
 
-    #[derive(Reflect)]
+    #[derive(Introspect)]
     enum C<'a> {
-        //A,
+        A,
         B(i32),
         C(i32, &'a str),
         D { x: &'a str },
     };
+    println!("{}", serde_json::to_string(&Reflect(&C::A)).unwrap());
     println!("{}", serde_json::to_string(&Reflect(&C::B(3))).unwrap());
     println!(
         "{}",
