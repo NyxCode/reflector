@@ -1,0 +1,7 @@
+[package]
+name = "heapsize"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+reflector = { path = "../reflector" }
