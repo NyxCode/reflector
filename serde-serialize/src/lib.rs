@@ -1,79 +1,14 @@
+mod visit;
+
+use std::error::Error;
 use reflector::*;
 use serde::ser::{
     SerializeStruct, SerializeStructVariant, SerializeTupleStruct, SerializeTupleVariant,
 };
 use serde::{Serialize, Serializer};
+use visit::{FieldVisitor, Fields, VariantVisitor, Variants};
 
-struct Reflect<'a, T>(&'a T);
-
-pub trait FieldVisitor<Root>: Sized {
-    type Error;
-
-    fn visit<F>(self, value: &F::Type) -> Result<Self, Self::Error>
-    where
-        F: Field<Root = Root, Type: Serialize>;
-}
-
-trait Fields<Root> {
-    const LEN: usize = 0;
-
-    fn for_each<V: FieldVisitor<Root>>(_root: &Root, visit: V) -> Result<V, V::Error> {
-        Ok(visit)
-    }
-}
-
-impl<Root> Fields<Root> for () {}
-
-impl<Root, Head, Tail> Fields<Root> for (Head, Tail)
-where
-    Head: Field<Root = Root, Type: Serialize>,
-    Tail: Fields<Root>,
-{
-    const LEN: usize = 1 + Tail::LEN;
-
-    fn for_each<V: FieldVisitor<Root>>(root: &Root, visit: V) -> Result<V, V::Error> {
-        let visit = visit.visit::<Head>(Head::try_get_ref(root).unwrap())?;
-        Tail::for_each(root, visit)
-    }
-}
-
-// --
-
-trait VariantVisitor<Root>: Sized {
-    type Error;
-
-    fn visit<T>(self, parent: &Root) -> Result<Self, Self::Error>
-    where
-        T: Variant<Root = Root, Fields: Fields<Root>> + Impl<Root, T::Kind>;
-}
-
-trait Variants<Root> {
-    const LEN: usize = 0;
-
-    fn for_each<V: VariantVisitor<Root>>(_: &Root, visit: V) -> Result<V, V::Error> {
-        Ok(visit)
-    }
-}
-
-impl<Parent> Variants<Parent> for () {}
-
-impl<Root, Head, Tail> Variants<Root> for (Head, Tail)
-where
-    Head: Variant<Root = Root, Fields: Fields<Root>> + Impl<Root, Head::Kind>,
-    Tail: Variants<Root>,
-{
-    const LEN: usize = 1 + Tail::LEN;
-
-    fn for_each<V>(parent: &Root, visit: V) -> Result<V, V::Error>
-    where
-        V: VariantVisitor<Root>,
-    {
-        let visit = visit.visit::<Head>(parent)?;
-        Tail::for_each(parent, visit)
-    }
-}
-
-// --
+pub struct Reflect<'a, T>(&'a T);
 
 impl<'a, T> Serialize for Reflect<'a, T>
 where
@@ -91,6 +26,11 @@ trait Impl<Root, Kind> {
 trait ImplStruct<Root, RootKind, Shape> {
     fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
 }
+
+trait ImplTuple<Root, RootKind, Fields> {
+    fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
+}
+
 
 impl<I: Struct> Impl<I::Root, StructType> for I
 where
@@ -137,7 +77,7 @@ where
         I::Fields::for_each(root, visit)?.0.end()
     }
 }
-// enum Parent { I { .. }, .. }
+// enum Parent { I { .. }, .. } }
 impl<I: Variant> ImplStruct<I::Root, EnumType, NamedStruct> for I
 where
     I::Fields: Fields<I::Root>,
@@ -200,10 +140,6 @@ where
     fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
         <I as ImplTuple<_, _, _>>::serialize(root, s)
     }
-}
-
-trait ImplTuple<Root, RootKind, Fields> {
-    fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
 }
 
 // struct I();
@@ -294,27 +230,20 @@ where
 
 #[test]
 fn works() {
+    use serde_json::to_string;
+
     #[derive(Introspect)]
     struct A<X> {
         a: i32,
         b: X,
     }
 
-    println!(
-        "{}",
-        serde_json::to_string(&Reflect(&A { a: 42, b: 3u8 })).unwrap()
-    );
-    println!(
-        "{}",
-        serde_json::to_string(&Reflect(&A { a: 42, b: "hey" })).unwrap()
-    );
+    println!("{}", to_string(&Reflect(&A { a: 42, b: 3u8 })).unwrap());
+    println!("{}", to_string(&Reflect(&A { a: 42, b: "hey" })).unwrap());
 
     #[derive(Introspect)]
     struct B<'a>(i32, &'a str);
-    println!(
-        "{}",
-        serde_json::to_string(&Reflect(&B(42, "hey"))).unwrap()
-    );
+    println!("{}", to_string(&Reflect(&B(42, "hey"))).unwrap());
 
     #[derive(Introspect)]
     enum C<'a> {
@@ -323,14 +252,8 @@ fn works() {
         C(i32, &'a str),
         D { x: &'a str },
     };
-    println!("{}", serde_json::to_string(&Reflect(&C::A)).unwrap());
-    println!("{}", serde_json::to_string(&Reflect(&C::B(3))).unwrap());
-    println!(
-        "{}",
-        serde_json::to_string(&Reflect(&C::C(3, "hey"))).unwrap()
-    );
-    println!(
-        "{}",
-        serde_json::to_string(&Reflect(&C::D { x: "hey" })).unwrap()
-    );
+    println!("{}", to_string(&Reflect(&C::A)).unwrap());
+    println!("{}", to_string(&Reflect(&C::B(3))).unwrap());
+    println!("{}", to_string(&Reflect(&C::C(3, "hey"))).unwrap());
+    println!("{}", to_string(&Reflect(&C::D { x: "hey" })).unwrap());
 }
