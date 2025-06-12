@@ -21,8 +21,6 @@ fn entry(input: proc_macro::TokenStream) -> Result<TokenStream> {
         x => return Err(Error::new(x.span(), "unsupported item")),
     };
 
-    println!("{output}");
-
     Ok(quote! {
         const _: () = { #output };
     })
@@ -117,7 +115,7 @@ fn for_enum(parent: &ItemEnum) -> TokenStream {
     );
 
     let variants = (0..parent.variants.len())
-        .map(|i| for_variant(parent, &parent.variants[i], &variant_struct_idents[i]));
+        .map(|i| for_variant(parent, &parent.variants[i], i, &variant_struct_idents[i]));
 
     let type_impl = expand_type(&parent.generics, &parent.ident);
 
@@ -138,7 +136,12 @@ fn for_enum(parent: &ItemEnum) -> TokenStream {
     }
 }
 
-fn for_variant(parent: &ItemEnum, variant: &Variant, variant_struct_ident: &Ident) -> TokenStream {
+fn for_variant(
+    parent: &ItemEnum,
+    variant: &Variant,
+    index: usize,
+    variant_struct_ident: &Ident,
+) -> TokenStream {
     let generics = &parent.generics;
     let parent_ident = &parent.ident;
     let vis = &parent.vis;
@@ -166,6 +169,8 @@ fn for_variant(parent: &ItemEnum, variant: &Variant, variant_struct_ident: &Iden
     quote! {
         #vis struct #variant_struct_ident #generics (#parent_ident #generics);
         impl #impl_generics ::reflector::Variant for #variant_struct_ident #type_generics {
+            const INDEX: usize = #index;
+
             fn is_active(p: &Self::Parent) -> bool { #is_active }
         }
         #struct_items
@@ -207,14 +212,8 @@ fn generate_field_items(
     );
 
     let ident = match &field.ident {
-        None => quote! {
-            type Ident = usize;
-            const IDENT: Self::Ident = #field_idx;
-        },
-        Some(ident) => quote! {
-            type Ident = &'static str;
-            const IDENT: Self::Ident = stringify!(#ident);
-        },
+        None => quote!(None),
+        Some(ident) => quote!(Some(stringify!(#ident))),
     };
 
     quote! {
@@ -227,7 +226,8 @@ fn generate_field_items(
             type Type = <#parent_ident #type_generics as ::reflector::HasField<Self>>::Type;
             type Parent = #parent_ident #type_generics;
 
-            #ident
+            const IDENT: Option<&'static str> = #ident;
+            const INDEX: usize = #field_idx;
 
             fn try_get_ref(p: &Self::Parent) -> Option<&Self::Type> { #accessor }
             fn try_get_mut(p: &mut Self::Parent) -> Option<&mut Self::Type> { #accessor }

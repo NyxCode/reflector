@@ -117,7 +117,7 @@ mod reflect {
             if Head::is_active(parent) {
                 Head::Fields::heap_size(parent)
             } else {
-                0
+                Tail::heap_size(parent)
             }
         }
     }
@@ -192,14 +192,13 @@ mod impls {
     }
 
     impl<const N: usize, T: HeapSize> HeapSize for [T; N] {
-        const HAS_HEAP: bool = true;
+        const HAS_HEAP: bool = T::HAS_HEAP;
 
         fn heap_size(&self) -> usize {
-            let direct = size_of::<T>();
             if T::HAS_HEAP {
-                direct + self.iter().map(T::heap_size).sum::<usize>()
+                self.iter().map(T::heap_size).sum::<usize>()
             } else {
-                direct
+                0
             }
         }
     }

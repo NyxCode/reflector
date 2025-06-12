@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 pub use reflector_derive::Reflect;
 
 pub struct StructShape;
@@ -12,10 +13,6 @@ pub trait Type {}
 
 pub trait HasShape {
     type Shape;
-}
-
-pub trait HasName {
-    const NAME: &'static str;
 }
 
 /// A struct type or an enum variant
@@ -42,6 +39,8 @@ pub trait Enum: Type {
 
 /// An enum variant
 pub trait Variant: Struct<Parent: Enum> {
+    const INDEX: usize;
+    
     fn is_active(p: &Self::Parent) -> bool;
 }
 
@@ -52,10 +51,9 @@ pub trait Field {
     /// Parent type in which this field is contained.
     /// Can be either a `Struct` or `Enum`.
     type Parent: Type;
-    /// Identifier of this field. Either `&'static str` or `usize`.
-    type Ident;
     
-    const IDENT: Self::Ident;
+    const IDENT: Option<&'static str>;
+    const INDEX: usize;
 
     /// Obtains a reference to the value of this field.
     /// Returns `None` iff `Self::Parent: Enum` and this field is contained in a variant which
@@ -67,16 +65,8 @@ pub trait Field {
     fn try_get_mut(p: &mut Self::Parent) -> Option<&mut Self::Type>;
 }
 
-
-pub trait NamedField: Field<Ident = &'static str> {}
-pub trait TupleField: Field<Ident = usize> {}
-
-impl<F: Field<Ident = &'static str>> NamedField for F {}
-impl<F: Field<Ident = usize>> TupleField for F {}
-
 #[doc(hidden)]
 pub trait HasField<F> {
     type Type;
 }
 
-// ...
