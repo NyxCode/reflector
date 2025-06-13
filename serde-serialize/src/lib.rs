@@ -1,35 +1,29 @@
 mod visit;
+mod de;
 
-use std::error::Error;
 use reflector::*;
 use serde::ser::{
     SerializeStruct, SerializeStructVariant, SerializeTupleStruct, SerializeTupleVariant,
 };
 use serde::{Serialize, Serializer};
+use std::error::Error;
 use visit::{FieldVisitor, Fields, VariantVisitor, Variants};
 
 pub struct Reflect<'a, T>(&'a T);
 
 impl<'a, T> Serialize for Reflect<'a, T>
 where
-    T: Introspect<Root = T> + Impl0,
+    T: Introspect<Root = T> + Impl,
 {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         T::serialize(self.0, serializer)
     }
 }
 
-trait Impl0: Introspect {
-    fn serialize<S: Serializer>(root: &Self::Root, s: S) -> Result<S::Ok, S::Error>;
-}
+trait Impl: Introspect + ImplKind<Self::Root, Self::Kind> {}
+impl<T> Impl for T where T: Introspect + ImplKind<T::Root, T::Kind> {}
 
-impl<T> Impl0 for T where T: Introspect + Impl<T::Root, T::Kind> {
-    fn serialize<S: Serializer>(root: &Self::Root, s: S) -> Result<S::Ok, S::Error> {
-        <T as Impl<_, _>>::serialize(root, s)
-    }
-}
-
-trait Impl<Root, Kind> {
+trait ImplKind<Root, Kind> {
     fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
 }
 
@@ -41,8 +35,7 @@ trait ImplTuple<Root, RootKind, Fields> {
     fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
 }
 
-
-impl<I: Struct> Impl<I::Root, StructType> for I
+impl<I: Struct> ImplKind<I::Root, StructType> for I
 where
     I: ImplStruct<I::Root, <I::Root as Introspect>::Kind, I::Shape>,
 {
@@ -117,7 +110,7 @@ where
 }
 
 // enum I { .. }
-impl<I: Enum> Impl<I::Root, EnumType> for I
+impl<I: Enum> ImplKind<I::Root, EnumType> for I
 where
     I::Variants: Variants<I::Root>,
 {
@@ -128,7 +121,7 @@ where
 
             fn visit<T>(self, root: &Root) -> Result<Self, Self::Error>
             where
-                T: Variant<Root = Root, Fields: Fields<Root>> + Impl0,
+                T: Variant<Root = Root, Fields: Fields<Root>> + Impl,
             {
                 if T::is_active(root) {
                     Err(T::serialize(root, self.0))

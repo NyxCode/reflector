@@ -1,4 +1,4 @@
-use crate::{Impl, Impl0};
+use crate::{ImplKind, Impl};
 use reflector::{Enum, Field, Introspect, Struct, Variant};
 use serde::Serialize;
 
@@ -38,7 +38,7 @@ pub trait VariantVisitor<Root>: Sized {
 
     fn visit<T>(self, root: &Root) -> Result<Self, Self::Error>
     where
-        T: Variant<Root = Root, Fields: Fields<Root>> + Impl0;
+        T: Variant<Root = Root, Fields: Fields<Root>> + Impl;
 }
 
 pub trait Variants<Root> {
@@ -53,7 +53,7 @@ impl<Root> Variants<Root> for () {}
 
 impl<Root, Head, Tail> Variants<Root> for (Head, Tail)
 where
-    Head: Variant<Root = Root, Fields: Fields<Root>> + Impl0,
+    Head: Variant<Root = Root, Fields: Fields<Root>> + Impl,
     Tail: Variants<Root>,
 {
     const LEN: usize = 1 + Tail::LEN;
