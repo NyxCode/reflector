@@ -12,10 +12,20 @@ pub struct Reflect<'a, T>(&'a T);
 
 impl<'a, T> Serialize for Reflect<'a, T>
 where
-    T: Introspect<Root = T> + Impl<T::Root, T::Kind>,
+    T: Introspect<Root = T> + Impl0,
 {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         T::serialize(self.0, serializer)
+    }
+}
+
+trait Impl0: Introspect {
+    fn serialize<S: Serializer>(root: &Self::Root, s: S) -> Result<S::Ok, S::Error>;
+}
+
+impl<T> Impl0 for T where T: Introspect + Impl<T::Root, T::Kind> {
+    fn serialize<S: Serializer>(root: &Self::Root, s: S) -> Result<S::Ok, S::Error> {
+        <T as Impl<_, _>>::serialize(root, s)
     }
 }
 
@@ -118,7 +128,7 @@ where
 
             fn visit<T>(self, root: &Root) -> Result<Self, Self::Error>
             where
-                T: Variant<Root = Root, Fields: Fields<Root>> + Impl<Root, T::Kind>,
+                T: Variant<Root = Root, Fields: Fields<Root>> + Impl0,
             {
                 if T::is_active(root) {
                     Err(T::serialize(root, self.0))
