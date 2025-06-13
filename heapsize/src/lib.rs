@@ -70,7 +70,7 @@ mod reflect {
             0
         }
     }
-    impl<P, Head, Tail> HeapSizeFields<P> for (Head, Tail)
+    impl<P, Head, Tail> HeapSizeFields<P> for Cons<Head, Tail>
     where
         Head: Field<Root = P>,
         Head::Type: HeapSize,
@@ -97,7 +97,7 @@ mod reflect {
             0
         }
     }
-    impl<P, Head, Tail> HeapSizeVariants<P> for (Head, Tail)
+    impl<P, Head, Tail> HeapSizeVariants<P> for Cons<Head, Tail>
     where
         Head: Variant<Root = P>,
         Head::Fields: HeapSizeFields<P>,

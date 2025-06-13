@@ -1,5 +1,8 @@
-use reflector::{EnumType, Field, FieldValues, FromValues, Introspect, Struct, StructType, ValuesOf};
-use serde::de::{Error, SeqAccess, Visitor};
+use reflector::{
+    Cons, EnumType, Field, FieldIdents, FieldValues, FromValues, Homogenous, Introspect, Struct,
+    StructType, ValuesOf,
+};
+use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt::Formatter;
 use std::marker::PhantomData;
@@ -70,8 +73,9 @@ struct _Visit<'de, T>(PhantomData<(&'de (), T)>);
 impl<'de, T> Visitor<'de> for _Visit<'de, T>
 where
     T: Struct + FromValues,
-    T::Fields: FieldValues,
-    ValuesOf<T::Fields>: FromSequence<'de>,
+    T::Fields: FieldValues + Fields,
+    ValuesOf<T::Fields>: FromSequence<'de>
+        + WrapWithOption<List: DeserializeFields<'de> + UnwrapOptions<List = ValuesOf<T::Fields>>>,
 {
     type Value = T;
 
@@ -87,24 +91,110 @@ where
         let values = ValuesOf::<T::Fields>::from_sequence(seq)?;
         Ok(T::from_values(values))
     }
-}
-
-struct Reflect<T>(pub T);
-impl<'de, T> Deserialize<'de> for Reflect<T> where T: Struct {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
-        D: Deserializer<'de>
+        A: MapAccess<'de>,
     {
-        //deserializer.deserialize_struct(T::IDENT, &[], _Visit(PhantomData))
-        unimplemented!()
+        let mut fields = <ValuesOf<T::Fields> as WrapWithOption>::List::default();
+        while let Some(key) = map.next_key::<_Field<T>>()? {
+            fields.deserialize(key.idx, &mut map)?;
+        }
+        let fields = fields.unwrap_all()?;
+        Ok(T::from_values(fields))
     }
 }
 
+trait UnwrapOptions {
+    type List;
 
+    fn unwrap_all<Error: serde::de::Error>(self) -> Result<Self::List, Error>;
+}
+impl UnwrapOptions for () {
+    type List = ();
 
+    fn unwrap_all<Error>(self) -> Result<Self::List, Error> {
+        Ok(())
+    }
+}
+impl<Head, Tail> UnwrapOptions for Cons<Option<Head>, Tail>
+where
+    Tail: UnwrapOptions,
+{
+    type List = Cons<Head, Tail::List>;
 
+    fn unwrap_all<Error: serde::de::Error>(self) -> Result<Self::List, Error> {
+        Ok(Cons(
+            self.0.ok_or_else(|| Error::custom("missing field"))?,
+            self.1.unwrap_all()?,
+        ))
+    }
+}
 
+trait DeserializeFields<'de> {
+    fn deserialize<A: MapAccess<'de>>(&mut self, idx: usize, map: &mut A) -> Result<(), A::Error>;
+}
 
+impl<'de> DeserializeFields<'de> for () {
+    fn deserialize<A: MapAccess<'de>>(&mut self, idx: usize, map: &mut A) -> Result<(), A::Error> {
+        map.next_value::<IgnoredAny>()?;
+        Ok(())
+    }
+}
+
+impl<'de, Head, Tail> DeserializeFields<'de> for Cons<Option<Head>, Tail>
+where
+    Head: Deserialize<'de>,
+    Tail: DeserializeFields<'de>,
+{
+    fn deserialize<A: MapAccess<'de>>(&mut self, idx: usize, map: &mut A) -> Result<(), A::Error> {
+        if idx > 0 {
+            return Tail::deserialize(&mut self.1, idx - 1, map);
+        }
+        if self.0.is_some() {
+            return Err(A::Error::custom("duplicate field"));
+        }
+
+        self.0 = Some(map.next_value()?);
+        Ok(())
+    }
+}
+
+trait WrapWithOption {
+    type List: Default;
+}
+
+impl WrapWithOption for () {
+    type List = ();
+}
+
+impl<Head, Tail> WrapWithOption for Cons<Head, Tail>
+where
+    Tail: WrapWithOption,
+{
+    type List = Cons<Option<Head>, Tail::List>;
+}
+
+struct Reflect<T>(pub T);
+impl<'de, T> Deserialize<'de> for Reflect<T>
+where
+    T: Struct + FromValues,
+    T::Fields: FieldIdents + Fields,
+    ValuesOf<T::Fields>: FromSequence<'de>
+        + WrapWithOption<List: DeserializeFields<'de> + UnwrapOptions<List = ValuesOf<T::Fields>>>,
+    <T::Fields as FieldIdents>::Idents: Homogenous<&'static str>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: T = deserializer.deserialize_struct(
+            T::IDENT,
+            T::Fields::AS_REF.as_slice(),
+            _Visit(PhantomData),
+        )?;
+        Ok(Self(value))
+    }
+}
 
 trait FromSequence<'de>: Sized {
     fn from_sequence<Seq>(seq: Seq) -> Result<Self, Seq::Error>
@@ -119,7 +209,7 @@ impl<'de> FromSequence<'de> for () {
         Ok(())
     }
 }
-impl<'de, Head, Tail> FromSequence<'de> for (Head, Tail)
+impl<'de, Head, Tail> FromSequence<'de> for Cons<Head, Tail>
 where
     Head: Deserialize<'de>,
     Tail: FromSequence<'de>,
@@ -128,7 +218,7 @@ where
     where
         Seq: SeqAccess<'de>,
     {
-        Ok((
+        Ok(Cons(
             seq.next_element()?
                 .ok_or_else(|| Seq::Error::custom("not enough items in sequence"))?,
             Tail::from_sequence(seq)?,
@@ -144,7 +234,7 @@ trait Fields {
 
 impl Fields for () {}
 
-impl<Head, Tail> Fields for (Head, Tail)
+impl<Head, Tail> Fields for Cons<Head, Tail>
 where
     Head: Field,
     Tail: Fields,
@@ -157,13 +247,13 @@ where
     }
 }
 
-
 #[test]
 fn works() {
-    #[derive(Introspect)]
+    #[derive(Debug, Introspect)]
     struct X {
-        a: i32
+        a: i32,
     }
-    
-    //let result: X = serde_json::from_str("{\"a\": 42}").unwrap();
+
+    let Reflect(result): Reflect<X> = serde_json::from_str("{\"a\": 42}").unwrap();
+    println!("{:?}", result);
 }

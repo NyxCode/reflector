@@ -53,7 +53,7 @@ fn expand_struct(
         .map(|i| format_ident!("{struct_ident}_{i}"))
         .collect::<Vec<Ident>>();
 
-    let field_list = church_list(
+    let field_list = type_list(
         field_struct_idents
             .iter()
             .map(|id| quote!(#id #type_generics)),
@@ -80,6 +80,25 @@ fn expand_struct(
         Fields::Unit => quote!(UnitStruct),
     };
 
+    let constructor = match variant {
+        None => {
+            // Cons(x0, Cons(x1, ()))
+            let args: Vec<_> = (0..fields.len()).map(|i| format_ident!("x{i}")).collect();
+            let values = args.iter().rev()
+                .fold(quote!(()), |acc, f| quote![::reflector::Cons(#f, #acc)]);
+            
+            let fields = fields.members().zip(&args).map(|(member, arg)| quote!(#member: #arg));
+            quote! {
+                impl #impl_generics ::reflector::FromValues for #struct_ident #type_generics {
+                    fn from_values(#values: ::reflector::ValuesOf<Self::Fields>) -> Self {
+                        Self { #(#fields),* }
+                    }
+                }
+            }
+        }
+        Some(_) => quote!(),
+    };
+
     quote! {
         #field_items
 
@@ -87,6 +106,8 @@ fn expand_struct(
             type Fields = #field_list;
             type Shape = ::reflector::#shape;
         }
+        
+        #constructor
 
         impl #impl_generics ::reflector::Introspect for #struct_ident #type_generics {
             const IDENT: &'static str = stringify!(#name);
@@ -107,7 +128,7 @@ fn for_enum(parent: &ItemEnum) -> TokenStream {
         .map(|v| format_ident!("{}_{}", parent.ident, v.ident))
         .collect::<Vec<Ident>>();
 
-    let variant_list = church_list(
+    let variant_list = type_list(
         variant_struct_idents
             .iter()
             .map(|i| quote!(#i #type_generics)),
@@ -180,10 +201,11 @@ fn for_variant(
     }
 }
 
-fn church_list(elements: impl DoubleEndedIterator<Item = TokenStream>) -> TokenStream {
-    elements
-        .rev()
-        .fold(quote![()], |list, element| quote![(#element, #list)])
+fn type_list(elements: impl DoubleEndedIterator<Item=TokenStream>) -> TokenStream {
+    elements.rev().fold(
+        quote![()],
+        |list, element| quote![::reflector::Cons<#element, #list>],
+    )
 }
 
 fn generate_field_items(

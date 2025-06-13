@@ -1,5 +1,5 @@
 use crate::{ImplKind, Impl};
-use reflector::{Enum, Field, Introspect, Struct, Variant};
+use reflector::{Cons, Enum, Field, Introspect, Struct, Variant};
 use serde::Serialize;
 
 pub trait FieldVisitor<Root>: Sized {
@@ -20,7 +20,7 @@ pub trait Fields<Root> {
 
 impl<Root> Fields<Root> for () {}
 
-impl<Root, Head, Tail> Fields<Root> for (Head, Tail)
+impl<Root, Head, Tail> Fields<Root> for Cons<Head, Tail>
 where
     Head: Field<Root = Root, Type: Serialize>,
     Tail: Fields<Root>,
@@ -51,7 +51,7 @@ pub trait Variants<Root> {
 
 impl<Root> Variants<Root> for () {}
 
-impl<Root, Head, Tail> Variants<Root> for (Head, Tail)
+impl<Root, Head, Tail> Variants<Root> for Cons<Head, Tail>
 where
     Head: Variant<Root = Root, Fields: Fields<Root>> + Impl,
     Tail: Variants<Root>,

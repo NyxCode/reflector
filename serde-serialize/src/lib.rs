@@ -160,7 +160,7 @@ impl<I: Variant> ImplTuple<I::Root, EnumType, ()> for I {
 }
 
 // struct I(A);
-impl<I: Struct, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, StructType, (A, ())>
+impl<I: Struct, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, StructType, Cons<A, ()>>
     for I
 {
     fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
@@ -168,7 +168,7 @@ impl<I: Struct, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, St
     }
 }
 // enum Root { I(A), .. };
-impl<I: Variant, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, EnumType, (A, ())>
+impl<I: Variant, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, EnumType, Cons<A, ()>>
     for I
 {
     fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
@@ -182,7 +182,7 @@ impl<I: Variant, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, E
 }
 
 // struct I(A, B, ..);
-impl<I: Struct, A, B, C> ImplTuple<I::Root, StructType, (A, (B, C))> for I
+impl<I: Struct, A, B, C> ImplTuple<I::Root, StructType, Cons<A, Cons<B, C>>> for I
 where
     I::Fields: Fields<I::Root>,
 {
@@ -206,7 +206,7 @@ where
     }
 }
 // enum Root { I(A, B, ..), .. };
-impl<I: Variant, A, B, C> ImplTuple<I::Root, EnumType, (A, (B, C))> for I
+impl<I: Variant, A, B, C> ImplTuple<I::Root, EnumType, Cons<A, Cons<B, C>>> for I
 where
     I::Fields: Fields<I::Root>,
 {
