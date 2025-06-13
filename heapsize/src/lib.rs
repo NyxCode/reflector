@@ -32,7 +32,7 @@ mod reflect {
         }
     }
 
-    impl<T> ReflectHelper<StructType> for T
+    impl<T> ReflectHelper<StructKind> for T
     where
         T: Struct,
         T::Fields: HeapSizeFields<T>,
@@ -44,7 +44,7 @@ mod reflect {
         }
     }
 
-    impl<T> ReflectHelper<EnumType> for T
+    impl<T> ReflectHelper<EnumKind> for T
     where
         T: Enum,
         T::Variants: HeapSizeVariants<T>,

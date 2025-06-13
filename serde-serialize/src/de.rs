@@ -1,7 +1,4 @@
-use reflector::{
-    Cons, EnumType, Field, FieldIdents, FieldValues, FromValues, Homogenous, Introspect, Struct,
-    StructType, ValuesOf,
-};
+use reflector::{Cons, EnumKind, Field, FromValues, Introspect, Map, NamedFields, SizedFields, Struct, StructKind};
 use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt::Formatter;
@@ -73,9 +70,11 @@ struct _Visit<'de, T>(PhantomData<(&'de (), T)>);
 impl<'de, T> Visitor<'de> for _Visit<'de, T>
 where
     T: Struct + FromValues,
-    T::Fields: FieldValues + Fields,
-    ValuesOf<T::Fields>: FromSequence<'de>
-        + WrapWithOption<List: DeserializeFields<'de> + UnwrapOptions<List = ValuesOf<T::Fields>>>,
+    T::Fields: SizedFields + Fields,
+    <T::Fields as SizedFields>::Types: FromSequence<'de>
+        + WrapWithOption<
+            List: DeserializeFields<'de> + UnwrapOptions<List = <T::Fields as SizedFields>::Types>,
+        >,
 {
     type Value = T;
 
@@ -88,14 +87,14 @@ where
     where
         A: SeqAccess<'de>,
     {
-        let values = ValuesOf::<T::Fields>::from_sequence(seq)?;
+        let values = <T::Fields as SizedFields>::Types::from_sequence(seq)?;
         Ok(T::from_values(values))
     }
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: MapAccess<'de>,
     {
-        let mut fields = <ValuesOf<T::Fields> as WrapWithOption>::List::default();
+        let mut fields = <<T::Fields as SizedFields>::Types as WrapWithOption>::List::default();
         while let Some(key) = map.next_key::<_Field<T>>()? {
             fields.deserialize(key.idx, &mut map)?;
         }
@@ -178,20 +177,18 @@ struct Reflect<T>(pub T);
 impl<'de, T> Deserialize<'de> for Reflect<T>
 where
     T: Struct + FromValues,
-    T::Fields: FieldIdents + Fields,
-    ValuesOf<T::Fields>: FromSequence<'de>
-        + WrapWithOption<List: DeserializeFields<'de> + UnwrapOptions<List = ValuesOf<T::Fields>>>,
-    <T::Fields as FieldIdents>::Idents: Homogenous<&'static str>,
+    T::Fields: NamedFields + Fields,
+    <T::Fields as SizedFields>::Types: FromSequence<'de>
+        + WrapWithOption<
+            List: DeserializeFields<'de> + UnwrapOptions<List = <T::Fields as SizedFields>::Types>,
+        >,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let value: T = deserializer.deserialize_struct(
-            T::IDENT,
-            T::Fields::AS_REF.as_slice(),
-            _Visit(PhantomData),
-        )?;
+        let value: T =
+            deserializer.deserialize_struct(T::IDENT, T::Fields::NAMES, _Visit(PhantomData))?;
         Ok(Self(value))
     }
 }

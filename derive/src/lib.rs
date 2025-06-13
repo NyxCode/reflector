@@ -75,9 +75,9 @@ fn expand_struct(
         })
         .collect::<TokenStream>();
     let shape = match fields {
-        Fields::Named(_) => quote!(NamedStruct),
-        Fields::Unnamed(_) => quote!(TupleStruct),
-        Fields::Unit => quote!(UnitStruct),
+        Fields::Named(_) => quote!(NamedShape),
+        Fields::Unnamed(_) => quote!(TupleShape),
+        Fields::Unit => quote!(UnitShape),
     };
 
     let constructor = match variant {
@@ -90,7 +90,7 @@ fn expand_struct(
             let fields = fields.members().zip(&args).map(|(member, arg)| quote!(#member: #arg));
             quote! {
                 impl #impl_generics ::reflector::FromValues for #struct_ident #type_generics {
-                    fn from_values(#values: ::reflector::ValuesOf<Self::Fields>) -> Self {
+                    fn from_values(#values: <Self::Fields as ::reflector::SizedFields>::Types) -> Self {
                         Self { #(#fields),* }
                     }
                 }
@@ -113,7 +113,7 @@ fn expand_struct(
             const IDENT: &'static str = stringify!(#name);
 
             type Root = #parent_ident #type_generics;
-            type Kind = ::reflector::StructType;
+            type Kind = ::reflector::StructKind;
         }
     }
 }
@@ -155,7 +155,7 @@ fn for_enum(parent: &ItemEnum) -> TokenStream {
             const IDENT: &'static str = stringify!(#parent_ident);
 
             type Root = #parent_ident #type_generics;
-            type Kind = ::reflector::EnumType;
+            type Kind = ::reflector::EnumKind;
         }
     }
 }

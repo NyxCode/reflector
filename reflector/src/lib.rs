@@ -1,22 +1,31 @@
 #![feature(freeze)]
 
-use std::marker::Freeze;
 pub use reflector_derive::Introspect;
+use std::marker::Freeze;
 
 pub trait Introspect {
     const IDENT: &'static str;
 
     type Root: Introspect;
-    type Kind;
+    type Kind: Kind;
 }
 
 pub trait Struct: Introspect {
-    type Shape;
-    type Fields;
+    type Shape: StructShape;
+    type Fields: FieldList;
 }
 
-pub trait FromValues: Struct<Fields: FieldValues> {
-    fn from_values(values: ValuesOf<Self::Fields>) -> Self;
+pub trait NamedStruct: Struct<Shape = NamedShape, Fields: NamedFields> {}
+impl<S> NamedStruct for S where S: Struct<Shape = NamedShape, Fields: NamedFields> {}
+
+pub trait TupleStruct: Struct<Shape = TupleShape> {}
+impl<S> TupleStruct for S where S: Struct<Shape = TupleShape> {}
+
+pub trait UnitStruct: Struct<Shape = UnitShape> {}
+impl<S> UnitStruct for S where S: Struct<Shape = UnitShape> {}
+
+pub trait FromValues: Struct<Fields: SizedFields> {
+    fn from_values(values: <Self::Fields as SizedFields>::Types) -> Self;
 }
 
 pub trait Enum: Introspect {
@@ -41,119 +50,127 @@ pub trait Field {
 }
 
 // struct shapes
-pub struct UnitStruct;
-pub struct TupleStruct;
-pub struct NamedStruct;
+pub trait StructShape {}
+pub struct UnitShape;
+pub struct TupleShape;
+pub struct NamedShape;
+impl StructShape for UnitShape {}
+impl StructShape for TupleShape {}
+impl StructShape for NamedShape {}
 
 // kinds
-pub struct StructType;
-pub struct EnumType;
+pub trait Kind {}
+pub struct StructKind;
+pub struct EnumKind;
+impl Kind for StructKind {}
+impl Kind for EnumKind {}
+
+// lists
+pub trait List {    
+    const LENGTH: usize;
+}
+impl List for () {
+    const LENGTH: usize = 0;
+}
+impl<Head, Tail> List for Cons<Head, Tail>
+where
+    Tail: List,
+{
+    const LENGTH: usize = 1 + Tail::LENGTH;
+}
+
+pub trait SizedFields {
+    type Types;
+}
+impl SizedFields for () {
+    type Types = ();
+}
+impl<Head, Tail> SizedFields for Cons<Head, Tail>
+where
+    Head: Field<Type: Sized>,
+    Tail: SizedFields,
+{
+    type Types = Cons<Head::Type, Tail::Types>;
+}
+
+pub trait FieldList {}
+impl FieldList for () {}
+impl<Head, Tail> FieldList for Cons<Head, Tail>
+where
+    Tail: FieldList,
+    Head: Field,
+{
+}
+
+pub trait NamedFields: List {
+    const NAMES: &'static [&'static str];
+    #[doc(hidden)]
+    type NameList: Freeze + Copy + 'static;
+    #[doc(hidden)]
+    const NAME_LIST: Self::NameList;
+}
+impl NamedFields for () {
+    const NAMES: &'static [&'static str] = &[];
+    type NameList = ();
+    const NAME_LIST: Self::NameList = ();
+}
+impl<Head, Tail> NamedFields for Cons<Head, Tail>
+where
+    Head: Field,
+    Tail: NamedFields,
+{
+    const NAMES: &'static [&'static str] = unsafe {
+        let name_list: &'static Self::NameList = &Self::NAME_LIST;
+        // SAFETY:  `Self::Idents` is `Cons<&'static str, Cons<.., ()>>`, only containing
+        //          `&'static str`s. Since `Cons` is `#[repr(C)]`, the layout of `name_list` is
+        //          the same as `[&str]`.
+        std::slice::from_raw_parts(
+            name_list as *const Self::NameList as *const &str,
+            Self::LENGTH,
+        )
+    };
+    type NameList = Cons<&'static str, Tail::NameList>;
+    const NAME_LIST: Self::NameList = const { Cons(Head::IDENT.unwrap(), Tail::NAME_LIST) };
+}
+
+// Cons(a, ..) => Cons(Some(a), ..)
+pub trait GenericFnMut {
+    type Return<Arg>;
+    
+    fn call<Arg>(&mut self, arg: Arg) -> Self::Return<Arg>; 
+}
+pub trait Map {
+    type Mapped<F: GenericFnMut>;
+    
+    fn map<F: GenericFnMut>(self, f: F) -> Self::Mapped<F>;
+}
+impl Map for () {
+    type Mapped<F: GenericFnMut> = ();
+
+    fn map<F: GenericFnMut>(self, f: F) -> Self::Mapped<F> {
+        ()
+    }
+}
+impl<Head, Tail> Map for Cons<Head, Tail> where Tail: Map {
+    type Mapped<F: GenericFnMut> = (F::Return<Head>, Tail::Mapped<F>);
+
+    fn map<F: GenericFnMut>(self, mut f: F) -> Self::Mapped<F> {
+        (f.call(self.0), self.1.map(f))
+    }
+}
+
+macro_rules! map_types {
+    () => {
+        ()
+    };
+}
 
 #[doc(hidden)]
 pub trait HasField<F> {
     type Type;
 }
 
-
-
-
-
-
-pub type ValuesOf<Fields> = <Fields as FieldValues>::Values;
-
-pub trait FieldValues {
-    type Values;
-}
-
-impl FieldValues for () {
-    type Values = ();
-}
-
-impl<Head, Tail> FieldValues for Cons<Head, Tail>
-where
-    Head: Field<Type: Sized>,
-    Tail: FieldValues,
-{
-    type Values = Cons<Head::Type, Tail::Values>;
-}
-
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct Cons<A, B>(pub A, pub B);
 
-pub trait Homogenous<T> {
-    const LEN: usize;
-    type Map<R>;
-
-    fn map<R, F: FnMut(T) -> R>(self, f: F) -> Self::Map<R>;
-    fn as_slice(&self) -> &[T];
-}
-
-impl<T> Homogenous<T> for () {
-    const LEN: usize = 0;
-    type Map<R> = ();
-
-    fn map<R, F: FnMut(T) -> R>(self, _: F) -> Self::Map<R> {
-        ()
-    }
-
-    fn as_slice(&self) -> &[T] {
-        &[]
-    }
-}
-
-impl<Head, Tail> Homogenous<Head> for Cons<Head, Tail>
-where
-    Tail: Homogenous<Head>,
-{
-    const LEN: usize = 1 + Tail::LEN;
-    type Map<R> = Cons<R, Tail::Map<R>>;
-
-    fn map<R, F: FnMut(Head) -> R>(self, mut f: F) -> Self::Map<R> {
-        Cons(f(self.0), self.1.map(f))
-    }
-
-    fn as_slice(&self) -> &[Head] {
-        unsafe { std::slice::from_raw_parts(self as *const Self as *const _, Self::LEN) }
-    }
-}
-
-const fn as_slice<T, H: Homogenous<T>>(list: &H) -> &[T] {
-    unsafe { std::slice::from_raw_parts(list as *const H as *const _, H::LEN) }
-}
-
-pub trait FieldIdents {
-    type Idents: Homogenous<&'static str> + 'static + Copy + Freeze;
-    const IDENTS: Self::Idents;
-    const AS_REF: &'static Self::Idents;
-}
-
-impl FieldIdents for () {
-    type Idents = ();
-    const IDENTS: Self::Idents = ();
-    const AS_REF: &'static Self::Idents = &();
-}
-impl<Head, Tail> FieldIdents for Cons<Head, Tail>
-where
-    Head: Field,
-    Tail: FieldIdents,
-{
-    type Idents = Cons<&'static str, Tail::Idents>;
-    const IDENTS: Self::Idents = const { Cons(Head::IDENT.unwrap(), Tail::IDENTS) };
-    const AS_REF: &'static Self::Idents = &Self::IDENTS;
-}
-
-const A: usize = 0;
-
-fn x() -> &'static usize {
-    let z: &'static usize = &A;
-    z
-}
-
-fn field_idents<T>() -> &'static [&'static str]
-where
-    T: Struct,
-    T::Fields: FieldIdents,
-{
-    <T::Fields as FieldIdents>::AS_REF.as_slice()
-}
