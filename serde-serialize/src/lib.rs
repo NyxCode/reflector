@@ -1,5 +1,5 @@
-mod visit;
 mod de;
+mod visit;
 
 use reflector::*;
 use serde::ser::{
@@ -160,16 +160,16 @@ impl<I: Variant> ImplTuple<I::Root, EnumKind, ()> for I {
 }
 
 // struct I(A);
-impl<I: Struct, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, StructKind, Cons<A, ()>>
-    for I
+impl<I: Struct, A: Field<Root = I::Root, Type: Serialize>>
+    ImplTuple<I::Root, StructKind, Cons<A, ()>> for I
 {
     fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_newtype_struct(I::IDENT, A::try_get_ref(root).unwrap())
     }
 }
 // enum Root { I(A), .. };
-impl<I: Variant, A: Field<Root = I::Root, Type: Serialize>> ImplTuple<I::Root, EnumKind, Cons<A, ()>>
-    for I
+impl<I: Variant, A: Field<Root = I::Root, Type: Serialize>>
+    ImplTuple<I::Root, EnumKind, Cons<A, ()>> for I
 {
     fn serialize<S: Serializer>(root: &I::Root, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_newtype_variant(

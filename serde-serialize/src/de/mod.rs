@@ -1,4 +1,7 @@
-use reflector::{Cons, EnumKind, Field, FromValues, Introspect, Map, NamedFields, SizedFields, Struct, StructKind};
+use reflector::{
+    Cons, EnumKind, Field, Introspect, List, NamedFields, NamedStruct, SizedFields, SizedStruct,
+    Struct, StructKind,
+};
 use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt::Formatter;
@@ -13,7 +16,7 @@ struct _FieldVisitor<T>(PhantomData<T>);
 impl<'de, T> Visitor<'de> for _FieldVisitor<T>
 where
     T: Struct,
-    T::Fields: Fields,
+    T::Fields: NamedFields,
 {
     type Value = _Field<T>;
 
@@ -44,7 +47,10 @@ where
         E: Error,
     {
         Ok(_Field {
-            idx: T::Fields::field_index(v).unwrap_or(usize::MAX),
+            idx: T::Fields::NAMES
+                .iter()
+                .position(|name| name.as_bytes() == v)
+                .unwrap_or(usize::MAX),
             _marker: PhantomData,
         })
     }
@@ -53,7 +59,7 @@ where
 impl<'de, T> Deserialize<'de> for _Field<T>
 where
     T: Struct,
-    T::Fields: Fields,
+    T::Fields: NamedFields,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -69,12 +75,8 @@ struct _Visit<'de, T>(PhantomData<(&'de (), T)>);
 
 impl<'de, T> Visitor<'de> for _Visit<'de, T>
 where
-    T: Struct + FromValues,
-    T::Fields: SizedFields + Fields,
-    <T::Fields as SizedFields>::Types: FromSequence<'de>
-        + WrapWithOption<
-            List: DeserializeFields<'de> + UnwrapOptions<List = <T::Fields as SizedFields>::Types>,
-        >,
+    T: NamedStruct + SizedStruct,
+    T::FieldTypes: FromSequence<'de> + Wrap<List: DeserializeFields<'de>>,
 {
     type Value = T;
 
@@ -87,45 +89,19 @@ where
     where
         A: SeqAccess<'de>,
     {
-        let values = <T::Fields as SizedFields>::Types::from_sequence(seq)?;
+        let values = T::FieldTypes::from_sequence(seq)?;
         Ok(T::from_values(values))
     }
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: MapAccess<'de>,
     {
-        let mut fields = <<T::Fields as SizedFields>::Types as WrapWithOption>::List::default();
+        let mut fields = <T::FieldTypes as Wrap>::List::default();
         while let Some(key) = map.next_key::<_Field<T>>()? {
             fields.deserialize(key.idx, &mut map)?;
         }
         let fields = fields.unwrap_all()?;
         Ok(T::from_values(fields))
-    }
-}
-
-trait UnwrapOptions {
-    type List;
-
-    fn unwrap_all<Error: serde::de::Error>(self) -> Result<Self::List, Error>;
-}
-impl UnwrapOptions for () {
-    type List = ();
-
-    fn unwrap_all<Error>(self) -> Result<Self::List, Error> {
-        Ok(())
-    }
-}
-impl<Head, Tail> UnwrapOptions for Cons<Option<Head>, Tail>
-where
-    Tail: UnwrapOptions,
-{
-    type List = Cons<Head, Tail::List>;
-
-    fn unwrap_all<Error: serde::de::Error>(self) -> Result<Self::List, Error> {
-        Ok(Cons(
-            self.0.ok_or_else(|| Error::custom("missing field"))?,
-            self.1.unwrap_all()?,
-        ))
     }
 }
 
@@ -158,30 +134,50 @@ where
     }
 }
 
-trait WrapWithOption {
-    type List: Default;
+trait Wrap {
+    type List: Unwrap<List = Self> + Default;
 }
-
-impl WrapWithOption for () {
+impl Wrap for () {
     type List = ();
 }
-
-impl<Head, Tail> WrapWithOption for Cons<Head, Tail>
+impl<Head, Tail> Wrap for Cons<Head, Tail>
 where
-    Tail: WrapWithOption,
+    Tail: Wrap,
 {
     type List = Cons<Option<Head>, Tail::List>;
+}
+
+trait Unwrap {
+    type List;
+
+    fn unwrap_all<Error: serde::de::Error>(self) -> Result<Self::List, Error>;
+}
+impl Unwrap for () {
+    type List = ();
+
+    fn unwrap_all<Error>(self) -> Result<Self::List, Error> {
+        Ok(())
+    }
+}
+impl<Head, Tail> Unwrap for Cons<Option<Head>, Tail>
+where
+    Tail: Unwrap,
+{
+    type List = Cons<Head, Tail::List>;
+
+    fn unwrap_all<Error: serde::de::Error>(self) -> Result<Self::List, Error> {
+        Ok(Cons(
+            self.0.ok_or_else(|| Error::custom("missing field"))?,
+            self.1.unwrap_all()?,
+        ))
+    }
 }
 
 struct Reflect<T>(pub T);
 impl<'de, T> Deserialize<'de> for Reflect<T>
 where
-    T: Struct + FromValues,
-    T::Fields: NamedFields + Fields,
-    <T::Fields as SizedFields>::Types: FromSequence<'de>
-        + WrapWithOption<
-            List: DeserializeFields<'de> + UnwrapOptions<List = <T::Fields as SizedFields>::Types>,
-        >,
+    T: NamedStruct + SizedStruct,
+    T::FieldTypes: FromSequence<'de> + Wrap<List: DeserializeFields<'de>>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -220,27 +216,6 @@ where
                 .ok_or_else(|| Seq::Error::custom("not enough items in sequence"))?,
             Tail::from_sequence(seq)?,
         ))
-    }
-}
-
-trait Fields {
-    fn field_index(ident: &[u8]) -> Option<usize> {
-        None
-    }
-}
-
-impl Fields for () {}
-
-impl<Head, Tail> Fields for Cons<Head, Tail>
-where
-    Head: Field,
-    Tail: Fields,
-{
-    fn field_index(ident: &[u8]) -> Option<usize> {
-        match Head::IDENT {
-            Some(i) if i.as_bytes() == ident => Some(Head::INDEX as _),
-            _ => Tail::field_index(ident),
-        }
     }
 }
 

@@ -24,8 +24,10 @@ impl<S> TupleStruct for S where S: Struct<Shape = TupleShape> {}
 pub trait UnitStruct: Struct<Shape = UnitShape> {}
 impl<S> UnitStruct for S where S: Struct<Shape = UnitShape> {}
 
-pub trait FromValues: Struct<Fields: SizedFields> {
-    fn from_values(values: <Self::Fields as SizedFields>::Types) -> Self;
+pub trait SizedStruct: Struct<Fields: SizedFields> {
+    type FieldTypes;
+
+    fn from_values(values: Self::FieldTypes) -> Self;
 }
 
 pub trait Enum: Introspect {
@@ -66,7 +68,7 @@ impl Kind for StructKind {}
 impl Kind for EnumKind {}
 
 // lists
-pub trait List {    
+pub trait List {
     const LENGTH: usize;
 }
 impl List for () {
@@ -80,7 +82,7 @@ where
 }
 
 pub trait SizedFields {
-    type Types;
+    type Types: List;
 }
 impl SizedFields for () {
     type Types = ();
@@ -133,32 +135,6 @@ where
     const NAME_LIST: Self::NameList = const { Cons(Head::IDENT.unwrap(), Tail::NAME_LIST) };
 }
 
-// Cons(a, ..) => Cons(Some(a), ..)
-pub trait GenericFnMut {
-    type Return<Arg>;
-    
-    fn call<Arg>(&mut self, arg: Arg) -> Self::Return<Arg>; 
-}
-pub trait Map {
-    type Mapped<F: GenericFnMut>;
-    
-    fn map<F: GenericFnMut>(self, f: F) -> Self::Mapped<F>;
-}
-impl Map for () {
-    type Mapped<F: GenericFnMut> = ();
-
-    fn map<F: GenericFnMut>(self, f: F) -> Self::Mapped<F> {
-        ()
-    }
-}
-impl<Head, Tail> Map for Cons<Head, Tail> where Tail: Map {
-    type Mapped<F: GenericFnMut> = (F::Return<Head>, Tail::Mapped<F>);
-
-    fn map<F: GenericFnMut>(self, mut f: F) -> Self::Mapped<F> {
-        (f.call(self.0), self.1.map(f))
-    }
-}
-
 macro_rules! map_types {
     () => {
         ()
@@ -173,4 +149,3 @@ pub trait HasField<F> {
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct Cons<A, B>(pub A, pub B);
-

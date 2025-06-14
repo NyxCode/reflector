@@ -1,4 +1,4 @@
-use crate::{ImplKind, Impl};
+use crate::{Impl, ImplKind};
 use reflector::{Cons, Enum, Field, Introspect, Struct, Variant};
 use serde::Serialize;
 
