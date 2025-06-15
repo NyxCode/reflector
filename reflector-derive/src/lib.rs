@@ -95,7 +95,7 @@ fn expand_struct(
         let variant = variant.map(|Variant { ident, .. }| quote!(:: #ident));
         quote! {
             impl #impl_generics ::reflector::SizedStruct for #struct_ident #type_generics {
-                type FieldTypes = <Self::Fields as ::reflector::SizedFields>::Types;
+                type FieldTypes = <Self::Fields as ::reflector::SizedFieldList>::Types;
 
                 fn from_values(#values: Self::FieldTypes) -> Self::Root {
                     Self::Root #variant { #(#fields),* }

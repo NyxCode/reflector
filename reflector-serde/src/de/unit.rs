@@ -1,7 +1,7 @@
+use std::{fmt::Formatter, marker::PhantomData};
+
 use reflector::SizedStruct;
 use serde::de::{Error, Visitor};
-use std::fmt::Formatter;
-use std::marker::PhantomData;
 
 pub struct Visit<'de, T>(pub PhantomData<(&'de (), T)>);
 

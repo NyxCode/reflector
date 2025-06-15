@@ -1,6 +1,7 @@
-use crate::ser::Impl;
 use reflector::{Cons, Field, Variant};
 use serde::Serialize;
+
+use crate::ser::Impl;
 
 pub trait FieldVisitor<Root>: Sized {
     type Error;

@@ -4,13 +4,13 @@ mod newtype;
 mod tuple;
 mod unit;
 
-use reflector::{
-    Cons, Enum, EnumKind, Introspect, List, NamedFields, NamedShape, NamedStruct, Struct,
-    StructKind, TupleShape, UnitShape, Variants,
-};
-use serde::de::Visitor;
-use serde::{Deserialize, Deserializer};
 use std::marker::PhantomData;
+
+use reflector::{
+    Cons, Enum, EnumKind, Introspect, List, NamedFieldList, NamedShape, NamedStruct, Struct,
+    StructKind, TupleShape, UnitShape, VariantList,
+};
+use serde::{Deserialize, Deserializer, de::Visitor};
 
 trait DeserializeKind<'de, T, Kind>: Sized {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error>;

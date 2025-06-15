@@ -11,6 +11,7 @@ pub trait HeapSize {
 mod reflect {
     use super::HeapSize;
     use reflector::*;
+    use reflector::Cons;
 
     pub struct Reflect<'a, T>(pub &'a T);
 

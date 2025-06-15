@@ -1,8 +1,10 @@
-use reflector::{Cons, NamedFields, NamedStruct, SizedStruct, Struct};
-use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer};
-use std::fmt::Formatter;
-use std::marker::PhantomData;
+use std::{fmt::Formatter, marker::PhantomData};
+
+use reflector::{Cons, NamedFieldList, NamedStruct, SizedStruct, Struct};
+use serde::{
+    Deserialize, Deserializer,
+    de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor},
+};
 
 struct FieldIndex<T> {
     idx: usize,
@@ -13,7 +15,7 @@ struct VisitFieldIndex<T>(PhantomData<T>);
 impl<'de, T> Visitor<'de> for VisitFieldIndex<T>
 where
     T: Struct,
-    T::Fields: NamedFields,
+    T::Fields: NamedFieldList,
 {
     type Value = FieldIndex<T>;
 
@@ -56,7 +58,7 @@ where
 impl<'de, T> Deserialize<'de> for FieldIndex<T>
 where
     T: Struct,
-    T::Fields: NamedFields,
+    T::Fields: NamedFieldList,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

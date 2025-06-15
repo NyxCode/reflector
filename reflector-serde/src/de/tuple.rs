@@ -1,8 +1,10 @@
+use std::{fmt::Formatter, marker::PhantomData};
+
 use reflector::{Cons, SizedStruct};
-use serde::Deserialize;
-use serde::de::{Error, SeqAccess, Visitor};
-use std::fmt::Formatter;
-use std::marker::PhantomData;
+use serde::{
+    Deserialize,
+    de::{Error, SeqAccess, Visitor},
+};
 
 pub struct Visit<'de, T>(pub PhantomData<(&'de (), T)>);
 

@@ -1,12 +1,13 @@
-use crate::visit::{FieldVisitor, Fields, VariantVisitor, Variants};
 use reflector::{
     Cons, Enum, EnumKind, Field, Introspect, NamedShape, Struct, StructKind, TupleShape, UnitShape,
     Variant,
 };
 use serde::ser::{
-    SerializeStruct, SerializeStructVariant, SerializeTupleStruct, SerializeTupleVariant,
+    Serialize, SerializeStruct, SerializeStructVariant, SerializeTupleStruct,
+    SerializeTupleVariant, Serializer,
 };
-use serde::{Serialize, Serializer};
+
+use crate::visit::{FieldVisitor, Fields, VariantVisitor, Variants};
 
 pub struct Reflect<'a, T>(pub &'a T);
 

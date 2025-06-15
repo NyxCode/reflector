@@ -1,11 +1,13 @@
+use std::{fmt::Formatter, marker::PhantomData};
+
 use reflector::{
-    Cons, Enum, Field, List, NamedFields, NamedShape, SizedStruct, TupleShape, UnitShape, Variant,
-    Variants,
+    Cons, Enum, Field, List, NamedFieldList, NamedShape, SizedStruct, TupleShape, UnitShape,
+    Variant, VariantList,
 };
-use serde::de::{EnumAccess, Error, VariantAccess, Visitor};
-use serde::{Deserialize, Deserializer};
-use std::fmt::Formatter;
-use std::marker::PhantomData;
+use serde::{
+    Deserialize, Deserializer,
+    de::{EnumAccess, Error, VariantAccess, Visitor},
+};
 
 struct Discriminant<T>(usize, PhantomData<T>);
 
@@ -134,7 +136,7 @@ where
 // struct variant
 impl<'de, T, V, Fields> DeserializeVariant<'de, T, NamedShape, Fields> for V
 where
-    V: Variant<Shape = NamedShape, Root = T, Fields: NamedFields> + SizedStruct,
+    V: Variant<Shape = NamedShape, Root = T, Fields: NamedFieldList> + SizedStruct,
     super::named::Visit<'de, V>: Visitor<'de, Value = T>,
 {
     fn deserialize<A: VariantAccess<'de>>(v: A) -> Result<T, A::Error> {
