@@ -1,5 +1,5 @@
-use heapsize::{HeapSize, Reflect};
 use reflector::Introspect;
+use reflector_heapsize::{HeapSize, Reflect};
 
 #[test]
 fn asdf() {
@@ -67,7 +67,7 @@ fn unit() {
     #[derive(Introspect)]
     pub struct B();
     #[derive(Introspect)]
-    pub struct C {};
+    pub struct C {}
 
     assert_eq!(Reflect(&A).heap_size(), 0);
     assert_eq!(Reflect(&B()).heap_size(), 0);

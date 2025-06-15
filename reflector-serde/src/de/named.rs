@@ -1,24 +1,21 @@
-use reflector::{
-    Cons, EnumKind, Field, Introspect, List, NamedFields, NamedStruct, SizedFields, SizedStruct,
-    Struct, StructKind,
-};
+use reflector::{Cons, NamedFields, NamedStruct, SizedStruct, Struct};
 use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::fmt::Formatter;
 use std::marker::PhantomData;
 
-struct _Field<T> {
+struct FieldIndex<T> {
     idx: usize,
     _marker: PhantomData<T>,
 }
 
-struct _FieldVisitor<T>(PhantomData<T>);
-impl<'de, T> Visitor<'de> for _FieldVisitor<T>
+struct VisitFieldIndex<T>(PhantomData<T>);
+impl<'de, T> Visitor<'de> for VisitFieldIndex<T>
 where
     T: Struct,
     T::Fields: NamedFields,
 {
-    type Value = _Field<T>;
+    type Value = FieldIndex<T>;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
         formatter.write_str("field identifier")
@@ -29,7 +26,7 @@ where
         E: Error,
     {
         let idx = usize::try_from(v).unwrap_or(usize::MAX);
-        Ok(_Field {
+        Ok(FieldIndex {
             idx,
             _marker: PhantomData,
         })
@@ -46,7 +43,7 @@ where
     where
         E: Error,
     {
-        Ok(_Field {
+        Ok(FieldIndex {
             idx: T::Fields::NAMES
                 .iter()
                 .position(|name| name.as_bytes() == v)
@@ -56,7 +53,7 @@ where
     }
 }
 
-impl<'de, T> Deserialize<'de> for _Field<T>
+impl<'de, T> Deserialize<'de> for FieldIndex<T>
 where
     T: Struct,
     T::Fields: NamedFields,
@@ -65,20 +62,21 @@ where
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_identifier(_FieldVisitor(PhantomData))
+        deserializer.deserialize_identifier(VisitFieldIndex(PhantomData))
     }
 }
 
 // ---
 
-struct _Visit<'de, T>(PhantomData<(&'de (), T)>);
+pub struct Visit<'de, T>(pub PhantomData<(&'de (), T)>);
 
-impl<'de, T> Visitor<'de> for _Visit<'de, T>
+impl<'de, T> Visitor<'de> for Visit<'de, T>
 where
     T: NamedStruct + SizedStruct,
-    T::FieldTypes: FromSequence<'de> + Wrap<List: DeserializeFields<'de>>,
+    super::tuple::Visit<'de, T>: Visitor<'de, Value = T::Root>,
+    T::FieldTypes: Wrap<List: DeserializeFields<'de>>,
 {
-    type Value = T;
+    type Value = T::Root;
 
     fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
         formatter.write_str("struct ")?;
@@ -89,15 +87,14 @@ where
     where
         A: SeqAccess<'de>,
     {
-        let values = T::FieldTypes::from_sequence(seq)?;
-        Ok(T::from_values(values))
+        super::tuple::Visit(PhantomData).visit_seq(seq)
     }
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: MapAccess<'de>,
     {
         let mut fields = <T::FieldTypes as Wrap>::List::default();
-        while let Some(key) = map.next_key::<_Field<T>>()? {
+        while let Some(key) = map.next_key::<FieldIndex<T>>()? {
             fields.deserialize(key.idx, &mut map)?;
         }
         let fields = fields.unwrap_all()?;
@@ -110,7 +107,7 @@ trait DeserializeFields<'de> {
 }
 
 impl<'de> DeserializeFields<'de> for () {
-    fn deserialize<A: MapAccess<'de>>(&mut self, idx: usize, map: &mut A) -> Result<(), A::Error> {
+    fn deserialize<A: MapAccess<'de>>(&mut self, _: usize, map: &mut A) -> Result<(), A::Error> {
         map.next_value::<IgnoredAny>()?;
         Ok(())
     }
@@ -171,61 +168,4 @@ where
             self.1.unwrap_all()?,
         ))
     }
-}
-
-struct Reflect<T>(pub T);
-impl<'de, T> Deserialize<'de> for Reflect<T>
-where
-    T: NamedStruct + SizedStruct,
-    T::FieldTypes: FromSequence<'de> + Wrap<List: DeserializeFields<'de>>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value: T =
-            deserializer.deserialize_struct(T::IDENT, T::Fields::NAMES, _Visit(PhantomData))?;
-        Ok(Self(value))
-    }
-}
-
-trait FromSequence<'de>: Sized {
-    fn from_sequence<Seq>(seq: Seq) -> Result<Self, Seq::Error>
-    where
-        Seq: SeqAccess<'de>;
-}
-impl<'de> FromSequence<'de> for () {
-    fn from_sequence<Seq>(seq: Seq) -> Result<Self, Seq::Error>
-    where
-        Seq: SeqAccess<'de>,
-    {
-        Ok(())
-    }
-}
-impl<'de, Head, Tail> FromSequence<'de> for Cons<Head, Tail>
-where
-    Head: Deserialize<'de>,
-    Tail: FromSequence<'de>,
-{
-    fn from_sequence<Seq>(mut seq: Seq) -> Result<Self, Seq::Error>
-    where
-        Seq: SeqAccess<'de>,
-    {
-        Ok(Cons(
-            seq.next_element()?
-                .ok_or_else(|| Seq::Error::custom("not enough items in sequence"))?,
-            Tail::from_sequence(seq)?,
-        ))
-    }
-}
-
-#[test]
-fn works() {
-    #[derive(Debug, Introspect)]
-    struct X {
-        a: i32,
-    }
-
-    let Reflect(result): Reflect<X> = serde_json::from_str("{\"a\": 42}").unwrap();
-    println!("{:?}", result);
 }

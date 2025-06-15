@@ -4,4 +4,4 @@ edition = "2024"
 version.workspace = true
 
 [dependencies]
-reflector-derive = { path = "../derive" }
+reflector-derive = { path = "../reflector-derive" }

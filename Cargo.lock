@@ -3,13 +3,6 @@
 version = 4
 
 [[package]]
-name = "heapsize"
-version = "0.0.1"
-dependencies = [
- "reflector",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -56,6 +49,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reflector-heapsize"
+version = "0.0.1"
+dependencies = [
+ "reflector",
+]
+
+[[package]]
+name = "reflector-serde"
+version = "0.0.1"
+dependencies = [
+ "reflector",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -68,15 +77,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde-serialize"
-version = "0.0.1"
-dependencies = [
- "reflector",
- "serde",
- "serde_json",
 ]
 
 [[package]]

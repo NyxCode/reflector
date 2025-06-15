@@ -1,5 +1,5 @@
-use crate::{Impl, ImplKind};
-use reflector::{Cons, Enum, Field, Introspect, Struct, Variant};
+use crate::ser::Impl;
+use reflector::{Cons, Field, Variant};
 use serde::Serialize;
 
 pub trait FieldVisitor<Root>: Sized {

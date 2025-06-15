@@ -1,15 +1,14 @@
-mod de;
-mod visit;
-
-use reflector::*;
+use crate::visit::{FieldVisitor, Fields, VariantVisitor, Variants};
+use reflector::{
+    Cons, Enum, EnumKind, Field, Introspect, NamedShape, Struct, StructKind, TupleShape, UnitShape,
+    Variant,
+};
 use serde::ser::{
     SerializeStruct, SerializeStructVariant, SerializeTupleStruct, SerializeTupleVariant,
 };
 use serde::{Serialize, Serializer};
-use std::error::Error;
-use visit::{FieldVisitor, Fields, VariantVisitor, Variants};
 
-pub struct Reflect<'a, T>(&'a T);
+pub struct Reflect<'a, T>(pub &'a T);
 
 impl<'a, T> Serialize for Reflect<'a, T>
 where
@@ -20,10 +19,11 @@ where
     }
 }
 
-trait Impl: Introspect + ImplKind<Self::Root, Self::Kind> {}
+pub trait Impl: Introspect + ImplKind<Self::Root, Self::Kind> {}
+
 impl<T> Impl for T where T: Introspect + ImplKind<T::Root, T::Kind> {}
 
-trait ImplKind<Root, Kind> {
+pub trait ImplKind<Root, Kind> {
     fn serialize<S: Serializer>(root: &Root, s: S) -> Result<S::Ok, S::Error>;
 }
 
@@ -50,6 +50,7 @@ impl<I: Struct> ImplStruct<I::Root, StructKind, UnitShape> for I {
         s.serialize_unit_struct(I::IDENT)
     }
 }
+
 // enum Root { I, .. };
 impl<I: Variant> ImplStruct<I::Root, EnumKind, UnitShape> for I {
     fn serialize<S: Serializer>(_: &I::Root, s: S) -> Result<S::Ok, S::Error> {
@@ -80,6 +81,7 @@ where
         I::Fields::for_each(root, visit)?.0.end()
     }
 }
+
 // enum Parent { I { .. }, .. } }
 impl<I: Variant> ImplStruct<I::Root, EnumKind, NamedShape> for I
 where
@@ -151,6 +153,7 @@ impl<I: Struct> ImplTuple<I::Root, StructKind, ()> for I {
         s.serialize_tuple_struct(I::IDENT, 0)?.end()
     }
 }
+
 // enum Root {  I(), .. }
 impl<I: Variant> ImplTuple<I::Root, EnumKind, ()> for I {
     fn serialize<S: Serializer>(_: &I::Root, s: S) -> Result<S::Ok, S::Error> {
@@ -167,6 +170,7 @@ impl<I: Struct, A: Field<Root = I::Root, Type: Serialize>>
         s.serialize_newtype_struct(I::IDENT, A::try_get_ref(root).unwrap())
     }
 }
+
 // enum Root { I(A), .. };
 impl<I: Variant, A: Field<Root = I::Root, Type: Serialize>>
     ImplTuple<I::Root, EnumKind, Cons<A, ()>> for I
@@ -205,6 +209,7 @@ where
         I::Fields::for_each(root, visit)?.0.end()
     }
 }
+
 // enum Root { I(A, B, ..), .. };
 impl<I: Variant, A, B, C> ImplTuple<I::Root, EnumKind, Cons<A, Cons<B, C>>> for I
 where
@@ -229,34 +234,4 @@ where
             Visit(s.serialize_tuple_variant(I::Root::IDENT, I::INDEX, I::IDENT, I::Fields::LEN)?);
         I::Fields::for_each(root, visit)?.0.end()
     }
-}
-
-#[test]
-fn works() {
-    use serde_json::to_string;
-
-    #[derive(Introspect)]
-    struct A<X> {
-        a: i32,
-        b: X,
-    }
-
-    println!("{}", to_string(&Reflect(&A { a: 42, b: 3u8 })).unwrap());
-    println!("{}", to_string(&Reflect(&A { a: 42, b: "hey" })).unwrap());
-
-    #[derive(Introspect)]
-    struct B<'a>(i32, &'a str);
-    println!("{}", to_string(&Reflect(&B(42, "hey"))).unwrap());
-
-    #[derive(Introspect)]
-    enum C<'a> {
-        A,
-        B(i32),
-        C(i32, &'a str),
-        D { x: &'a str },
-    };
-    println!("{}", to_string(&Reflect(&C::A)).unwrap());
-    println!("{}", to_string(&Reflect(&C::B(3))).unwrap());
-    println!("{}", to_string(&Reflect(&C::C(3, "hey"))).unwrap());
-    println!("{}", to_string(&Reflect(&C::D { x: "hey" })).unwrap());
 }

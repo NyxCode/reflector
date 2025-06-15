@@ -22,6 +22,7 @@ fn entry(input: proc_macro::TokenStream) -> Result<TokenStream> {
     };
 
     Ok(quote! {
+        #[allow(dead_code, non_camel_case_types)]
         const _: () = { #output };
     })
 }
@@ -47,7 +48,7 @@ fn expand_struct(
     fields: &Fields,
     variant: Option<&Variant>,
 ) -> TokenStream {
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let (impl_generics, type_generics, ..) = generics.split_for_impl();
 
     let field_struct_idents = (0..fields.len())
         .map(|i| format_ident!("{struct_ident}_{i}"))
@@ -80,29 +81,27 @@ fn expand_struct(
         Fields::Unit => quote!(UnitShape),
     };
 
-    let sized = match variant {
-        None => {
-            let args: Vec<_> = (0..fields.len()).map(|i| format_ident!("x{i}")).collect();
-            let values = args
-                .iter()
-                .rev()
-                .fold(quote!(()), |acc, f| quote![::reflector::Cons(#f, #acc)]);
+    let sized = {
+        let args: Vec<_> = (0..fields.len()).map(|i| format_ident!("x{i}")).collect();
+        let values = args
+            .iter()
+            .rev()
+            .fold(quote!(()), |acc, f| quote![::reflector::Cons(#f, #acc)]);
 
-            let fields = fields
-                .members()
-                .zip(&args)
-                .map(|(member, arg)| quote!(#member: #arg));
-            quote! {
-                impl #impl_generics ::reflector::SizedStruct for #struct_ident #type_generics {
-                    type FieldTypes = <Self::Fields as ::reflector::SizedFields>::Types;
+        let fields = fields
+            .members()
+            .zip(&args)
+            .map(|(member, arg)| quote!(#member: #arg));
+        let variant = variant.map(|Variant { ident, .. }| quote!(:: #ident));
+        quote! {
+            impl #impl_generics ::reflector::SizedStruct for #struct_ident #type_generics {
+                type FieldTypes = <Self::Fields as ::reflector::SizedFields>::Types;
 
-                    fn from_values(#values: Self::FieldTypes) -> Self {
-                        Self { #(#fields),* }
-                    }
+                fn from_values(#values: Self::FieldTypes) -> Self::Root {
+                    Self::Root #variant { #(#fields),* }
                 }
             }
         }
-        Some(_) => quote!(),
     };
 
     quote! {
@@ -126,7 +125,7 @@ fn expand_struct(
 
 fn for_enum(parent: &ItemEnum) -> TokenStream {
     let parent_ident = &parent.ident;
-    let (impl_generics, type_generics, where_clause) = parent.generics.split_for_impl();
+    let (impl_generics, type_generics, ..) = parent.generics.split_for_impl();
 
     let variant_struct_idents = parent
         .variants
@@ -175,7 +174,7 @@ fn for_variant(
     let generics = &parent.generics;
     let parent_ident = &parent.ident;
     let vis = &parent.vis;
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let (impl_generics, type_generics, ..) = generics.split_for_impl();
 
     let is_active = {
         let variant_ident = &variant.ident;
@@ -194,7 +193,7 @@ fn for_variant(
         &variant.ident,
         &parent.generics,
         &variant.fields,
-        Some(&variant),
+        Some(variant),
     );
     quote! {
         #vis struct #variant_struct_ident #generics (#parent_ident #generics);
@@ -224,7 +223,7 @@ fn generate_field_items(
     inside_variant: Option<&Variant>,
 ) -> TokenStream {
     let field_type = &field.ty;
-    let (impl_generics, type_generics, where_clause) = parent_generics.split_for_impl();
+    let (impl_generics, type_generics, ..) = parent_generics.split_for_impl();
 
     let accessor = accessor(
         inside_variant,
@@ -240,7 +239,6 @@ fn generate_field_items(
     };
 
     quote! {
-        #[allow(dead_code)]
         #parent_vis struct #field_struct_ident #parent_generics(#parent_ident #type_generics);
         impl #impl_generics ::reflector::HasField<#field_struct_ident #type_generics> for #parent_ident #type_generics {
             type Type = #field_type;

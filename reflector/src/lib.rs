@@ -27,11 +27,11 @@ impl<S> UnitStruct for S where S: Struct<Shape = UnitShape> {}
 pub trait SizedStruct: Struct<Fields: SizedFields> {
     type FieldTypes;
 
-    fn from_values(values: Self::FieldTypes) -> Self;
+    fn from_values(values: Self::FieldTypes) -> Self::Root;
 }
 
 pub trait Enum: Introspect {
-    type Variants;
+    type Variants: Variants;
 }
 
 pub trait Variant: Struct {
@@ -68,6 +68,10 @@ impl Kind for StructKind {}
 impl Kind for EnumKind {}
 
 // lists
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+
+pub struct Cons<A, B>(pub A, pub B);
 pub trait List {
     const LENGTH: usize;
 }
@@ -95,7 +99,7 @@ where
     type Types = Cons<Head::Type, Tail::Types>;
 }
 
-pub trait FieldList {}
+pub trait FieldList: List {}
 impl FieldList for () {}
 impl<Head, Tail> FieldList for Cons<Head, Tail>
 where
@@ -135,17 +139,39 @@ where
     const NAME_LIST: Self::NameList = const { Cons(Head::IDENT.unwrap(), Tail::NAME_LIST) };
 }
 
-macro_rules! map_types {
-    () => {
-        ()
+pub trait Variants: List {
+    const NAMES: &'static [&'static str];
+
+    #[doc(hidden)]
+    type NameList: Freeze + Copy + 'static;
+    #[doc(hidden)]
+    const NAME_LIST: Self::NameList;
+}
+impl Variants for () {
+    const NAMES: &'static [&'static str] = &[];
+    type NameList = ();
+    const NAME_LIST: Self::NameList = ();
+}
+impl<Head, Tail> Variants for Cons<Head, Tail>
+where
+    Head: Variant,
+    Tail: Variants,
+{
+    const NAMES: &'static [&'static str] = unsafe {
+        let name_list: &'static Self::NameList = &Self::NAME_LIST;
+        // SAFETY:  `Self::Idents` is `Cons<&'static str, Cons<.., ()>>`, only containing
+        //          `&'static str`s. Since `Cons` is `#[repr(C)]`, the layout of `name_list` is
+        //          the same as `[&str]`.
+        std::slice::from_raw_parts(
+            name_list as *const Self::NameList as *const &str,
+            Self::LENGTH,
+        )
     };
+    type NameList = Cons<&'static str, Tail::NameList>;
+    const NAME_LIST: Self::NameList = const { Cons(Head::IDENT, Tail::NAME_LIST) };
 }
 
 #[doc(hidden)]
 pub trait HasField<F> {
     type Type;
 }
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct Cons<A, B>(pub A, pub B);
